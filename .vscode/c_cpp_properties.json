@@ -1,0 +1,10 @@
+{
+    "configurations": [
+        {
+            "name": "PlatformIO ESP32-S3",
+            "compileCommands": "${workspaceFolder}/firmware/compile_commands.json",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}
