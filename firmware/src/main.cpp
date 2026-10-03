@@ -25,6 +25,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <DHT.h>
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length);
 void VerificaConexoesWiFIEMQTT();
@@ -36,6 +37,9 @@ void reconnectMQTT();
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
 #define SCREEN_ADDRESS 0x3C
+#define DHTPIN 15
+#define DHTTYPE DHT22
+DHT dht(DHTPIN, DHTTYPE);
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -99,6 +103,11 @@ char* TOPICO_SUBSCRIBE = const_cast<char*>(default_TOPICO_SUBSCRIBE);
 char* TOPICO_PUBLISH_1 = const_cast<char*>(default_TOPICO_PUBLISH_1);
 char* TOPICO_PUBLISH_2 = const_cast<char*>(default_TOPICO_PUBLISH_2);
 char* ID_MQTT = const_cast<char*>(default_ID_MQTT);
+const char* default_TOPICO_PUBLISH_3 = "/TEF/lamp001/attrs/t";
+const char* default_TOPICO_PUBLISH_4 = "/TEF/lamp001/attrs/h";
+char* TOPICO_PUBLISH_3 = const_cast<char*>(default_TOPICO_PUBLISH_3);
+char* TOPICO_PUBLISH_4 = const_cast<char*>(default_TOPICO_PUBLISH_4);
+unsigned long ultimateLeituraDHT = 0;
 
 WiFiClient espClient;
 PubSubClient MQTT(espClient);
@@ -234,12 +243,28 @@ void initMQTT() {
     delay(3000);
 }
 
+void handleDHT() {
+    if (millis() - ultimateLeituraDHT < 2000) return;
+
+    ultimateLeituraDHT = millis();
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+    if (isnan(t) || isnan(h)) {
+        Serial.println("Falha ao ler o DHT22!");
+        return;
+    }
+    MQTT.publish(TOPICO_PUBLISH_3, String(t, 1).c_str());
+    MQTT.publish(TOPICO_PUBLISH_4, String(h, 1).c_str());
+    Serial.printf("Temp: %.1f C | Umid: %.1f %%\n", t, h);
+}
+
 void setup() {
     // Inicializa pinos do LED RGB
     pinMode(PIN_R, OUTPUT);
     pinMode(PIN_G, OUTPUT);
     pinMode(PIN_B, OUTPUT);
     setRGB(false, false, false);
+    dht.begin();
 
     initSerial();
 
@@ -261,6 +286,7 @@ void loop() {
     VerificaConexoesWiFIEMQTT();
     EnviaEstadoOutputMQTT();
     handleLuminosity();
+    handleDHT();
     MQTT.loop();
 
     display.clearDisplay();
