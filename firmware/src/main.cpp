@@ -84,9 +84,9 @@ const int PIN_G = 19;
 const int PIN_B = 23;
 
 // Configurações - variáveis editáveis
-const char* default_SSID = "Galaxy S26 Ultra Gianluca";
-const char* default_PASSWORD = "1008100810";
-const char* default_BROKER_MQTT = "54.236.175.117";
+const char* default_SSID = "";
+const char* default_PASSWORD = "";
+const char* default_BROKER_MQTT = "";
 const int default_BROKER_PORT = 1883;
 const char* default_TOPICO_SUBSCRIBE = "/TEF/lamp001/cmd";
 const char* default_TOPICO_PUBLISH_1 = "/TEF/lamp001/attrs";
