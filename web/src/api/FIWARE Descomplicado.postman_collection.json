@@ -167,7 +167,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"devices\": [\n    {\n      \"device_id\": \"lamp001\",\n      \"entity_name\": \"urn:ngsi-ld:Lamp:001\",\n      \"entity_type\": \"Lamp\",\n      \"protocol\": \"PDI-IoTA-UltraLight\",\n      \"transport\": \"MQTT\",\n      \"commands\": [\n        { \"name\": \"red\", \"type\": \"command\" },\n        { \"name\": \"green\", \"type\": \"command\" },\n        { \"name\": \"blue\", \"type\": \"command\" },\n        { \"name\": \"yellow\", \"type\": \"command\" },\n        { \"name\": \"cyan\", \"type\": \"command\" },\n        { \"name\": \"magenta\", \"type\": \"command\" },\n        { \"name\": \"white\", \"type\": \"command\" },\n        { \"name\": \"off\", \"type\": \"command\" }\n      ],\n      \"attributes\": [\n        { \"object_id\": \"s\", \"name\": \"state\", \"type\": \"Text\" },\n        { \"object_id\": \"l\", \"name\": \"luminosity\", \"type\": \"Integer\" },\n        { \"object_id\": \"t\", \"name\": \"temperature\", \"type\": \"Float\" },\n        { \"object_id\": \"h\", \"name\": \"humidity\", \"type\": \"Float\" }\n      ]\n    }\n  ]\n}",
+              "raw": "{\n  \"devices\": [\n    {\n      \"device_id\": \"lamp001\",\n      \"entity_name\": \"urn:ngsi-ld:Lamp:001\",\n      \"entity_type\": \"Lamp\",\n      \"protocol\": \"PDI-IoTA-UltraLight\",\n      \"transport\": \"MQTT\",\n      \"commands\": [\n        { \"name\": \"red\", \"type\": \"command\" },\n        { \"name\": \"green\", \"type\": \"command\" },\n        { \"name\": \"blue\", \"type\": \"command\" },\n        { \"name\": \"yellow\", \"type\": \"command\" },\n        { \"name\": \"cyan\", \"type\": \"command\" },\n        { \"name\": \"magenta\", \"type\": \"command\" },\n        { \"name\": \"white\", \"type\": \"command\" },\n        { \"name\": \"off\", \"type\": \"command\" },\n        { \"name\": \"auto\", \"type\": \"command\" },\n        { \"name\": \"manual\", \"type\": \"command\" }\n      ],\n      \"attributes\": [\n        { \"object_id\": \"s\", \"name\": \"state\", \"type\": \"Text\" },\n        { \"object_id\": \"l\", \"name\": \"luminosity\", \"type\": \"Integer\" },\n        { \"object_id\": \"t\", \"name\": \"temperature\", \"type\": \"Float\" },\n        { \"object_id\": \"h\", \"name\": \"humidity\", \"type\": \"Float\" },\n        { \"object_id\": \"m\", \"name\": \"ledMode\", \"type\": \"Text\" },\n        { \"object_id\": \"a\", \"name\": \"alert\", \"type\": \"Text\" }\n      ]\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -209,7 +209,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"description\": \"Lamp Commands\",\n  \"dataProvided\": {\n    \"entities\": [\n      {\n        \"id\": \"urn:ngsi-ld:Lamp:001\", \"type\": \"Lamp\"\n      }\n    ],\n    \"attrs\": [\"red\", \"green\", \"blue\", \"yellow\", \"cyan\", \"magenta\", \"white\", \"off\"]\n  },\n  \"provider\": {\n    \"http\": { \"url\": \"http://{{url}}:4041\" },\n    \"legacyForwarding\": true\n  }\n}",
+              "raw": "{\n  \"description\": \"Lamp Commands\",\n  \"dataProvided\": {\n    \"entities\": [\n      {\n        \"id\": \"urn:ngsi-ld:Lamp:001\", \"type\": \"Lamp\"\n      }\n    ],\n    \"attrs\": [\"red\", \"green\", \"blue\", \"yellow\", \"cyan\", \"magenta\", \"white\", \"off\", \"auto\", \"manual\"]\n  },\n  \"provider\": {\n    \"http\": { \"url\": \"http://{{url}}:4041\" },\n    \"legacyForwarding\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -307,6 +307,94 @@
           "response": []
         },
         {
+          "name": "6.1 LED Mode Manual",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "fiware-service",
+                "value": "smart"
+              },
+              {
+                "key": "fiware-servicepath",
+                "value": "/"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"manual\": {\n      \"type\" : \"command\",\n      \"value\" : \"\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://{{url}}:1026/v2/entities/urn:ngsi-ld:Lamp:001/attrs",
+              "protocol": "http",
+              "host": [
+                "{{url}}"
+              ],
+              "port": "1026",
+              "path": [
+                "v2",
+                "entities",
+                "urn:ngsi-ld:Lamp:001",
+                "attrs"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.2 LED Mode Auto",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "fiware-service",
+                "value": "smart"
+              },
+              {
+                "key": "fiware-servicepath",
+                "value": "/"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"auto\": {\n      \"type\" : \"command\",\n      \"value\" : \"\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://{{url}}:1026/v2/entities/urn:ngsi-ld:Lamp:001/attrs",
+              "protocol": "http",
+              "host": [
+                "{{url}}"
+              ],
+              "port": "1026",
+              "path": [
+                "v2",
+                "entities",
+                "urn:ngsi-ld:Lamp:001",
+                "attrs"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
           "name": "7. Result of  Smart Lamp Luminosity",
           "request": {
             "method": "GET",
@@ -379,6 +467,49 @@
                 "urn:ngsi-ld:Lamp:001",
                 "attrs",
                 "state"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8.1 Result of LED Mode and Alert",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "fiware-service",
+                "value": "smart",
+                "type": "text"
+              },
+              {
+                "key": "fiware-servicepath",
+                "value": "/",
+                "type": "text"
+              },
+              {
+                "key": "accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://{{url}}:1026/v2/entities/urn:ngsi-ld:Lamp:001?attrs=state,ledMode,alert",
+              "protocol": "http",
+              "host": [
+                "{{url}}"
+              ],
+              "port": "1026",
+              "path": [
+                "v2",
+                "entities",
+                "urn:ngsi-ld:Lamp:001"
+              ],
+              "query": [
+                {
+                  "key": "attrs",
+                  "value": "state,ledMode,alert"
+                }
               ]
             }
           },
