@@ -85,22 +85,16 @@ const uint8_t carinhaFeliz[] PROGMEM = {
   0x00, 0x00, 0x00, 0x00
 };
 
-// Pinos do LED RGB (KY-016)
 const int PIN_R = 10;
 const int PIN_G = 11;
 const int PIN_B = 12;
 
-// Pino do buzzer
 const int PIN_BUZZER = 4;
 
-// ===================== Triggers =====================
-// Dentro de [alertaMin, alertaMax] = normal
-// Entre alerta e crítico = ALERTA (LED amarelo piscando)
-// Abaixo de critMin ou acima de critMax = CRÍTICO (LED vermelho piscando)
 struct Faixa { float critMin, alertaMin, alertaMax, critMax; };
-const Faixa FAIXA_TEMP = {  8.0, 10.0, 16.0, 18.0 };  // °C
-const Faixa FAIXA_UMID = { 40.0, 50.0, 75.0, 85.0 };  // %
-const Faixa FAIXA_LUZ  = { -1.0, -1.0, 30.0, 60.0 };  // % (só limite superior: adega deve ficar escura)
+const Faixa FAIXA_TEMP = {  8.0, 10.0, 16.0, 18.0 };
+const Faixa FAIXA_UMID = { 40.0, 50.0, 75.0, 85.0 };
+const Faixa FAIXA_LUZ  = { -1.0, -1.0, 30.0, 60.0 };
 
 enum Nivel { NIVEL_OK = 0, NIVEL_ALERTA = 1, NIVEL_CRITICO = 2 };
 enum Anomalia { ANOM_TEMP = 0, ANOM_UMID = 1, ANOM_LUZ = 2, QTD_ANOM = 3 };
@@ -111,15 +105,13 @@ float temperatura = NAN;
 float umidade = NAN;
 int luminosidade = 0;
 
-// Alerta sonoro: um padrão diferente para cada tipo de anomalia (freq 0 = silêncio)
 struct Nota { uint16_t freq; uint16_t ms; };
-const Nota SOM_TEMP[] = { {2000, 150}, {0, 100}, {2000, 150}, {0, 1100} };                          // 2 bipes agudos curtos
-const Nota SOM_UMID[] = { {900, 700}, {0, 800} };                                                     // 1 bipe grave longo
-const Nota SOM_LUZ[]  = { {1500, 80}, {0, 80}, {1500, 80}, {0, 80}, {1500, 80}, {0, 1100} };          // 3 bipes rápidos
+const Nota SOM_TEMP[] = { {2000, 150}, {0, 100}, {2000, 150}, {0, 1100} };
+const Nota SOM_UMID[] = { {900, 700}, {0, 800} };
+const Nota SOM_LUZ[]  = { {1500, 80}, {0, 80}, {1500, 80}, {0, 80}, {1500, 80}, {0, 1100} };
 struct Padrao { const Nota* notas; uint8_t qtd; };
 const Padrao PADROES[QTD_ANOM] = { {SOM_TEMP, 4}, {SOM_UMID, 2}, {SOM_LUZ, 6} };
 
-// Modo do LED: auto (segue os triggers) ou manual (cor escolhida pelo usuário via FIWARE)
 bool modoManual = false;
 String corManual = "off";
 const unsigned long INTERVALO_PISCA = 500;
@@ -127,7 +119,6 @@ const unsigned long INTERVALO_PUBLICACAO = 1000;
 unsigned long ultimaPublicacaoEstado = 0;
 unsigned long ultimaPublicacaoLuz = 0;
 
-// Configurações - variáveis editáveis
 const char* default_SSID = "";
 const char* default_PASSWORD = "";
 const char* default_BROKER_MQTT = "";
@@ -138,7 +129,6 @@ const char* default_TOPICO_PUBLISH_2 = "/TEF/lamp001/attrs/l";
 const char* default_ID_MQTT = "fiware_001";
 const char* topicPrefix = "lamp001";
 
-// Variáveis para configurações editáveis
 char* SSID = const_cast<char*>(default_SSID);
 char* PASSWORD = const_cast<char*>(default_PASSWORD);
 char* BROKER_MQTT = const_cast<char*>(default_BROKER_MQTT);
@@ -157,14 +147,12 @@ WiFiClient espClient;
 PubSubClient MQTT(espClient);
 String corAtual = "off";
 
-// Função para setar a cor do LED RGB
 void setRGB(int r, int g, int b) {
     analogWrite(PIN_R, r);
     analogWrite(PIN_G, g);
     analogWrite(PIN_B, b);
 }
 
-// Acende uma das cores pré-definidas. Retorna false se o nome não for uma cor conhecida.
 bool aplicaCor(const String& cor) {
     if (cor == "red")          setRGB(255, 0, 0);
     else if (cor == "green")   setRGB(0, 255, 0);
@@ -319,7 +307,6 @@ void handleDHT() {
 }
 
 void setup() {
-    // Inicializa pinos do LED RGB
     pinMode(PIN_R, OUTPUT);
     pinMode(PIN_G, OUTPUT);
     pinMode(PIN_B, OUTPUT);
@@ -330,7 +317,7 @@ void setup() {
 
     initSerial();
 
-    Wire.begin(8, 9);  // SDA, SCL (padrão do ESP32-S3)
+    Wire.begin(8, 9);
     if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
         Serial.println(F("Falha ao inicializar o SSD1309!"));
         for (;;);
@@ -356,7 +343,6 @@ void loop() {
 
     display.clearDisplay();
 
-    // Status lado esquerdo
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
 
@@ -374,7 +360,6 @@ void loop() {
     else
         display.println(F("Desconectado"));
 
-    // Carinha feliz no canto direito
     display.drawBitmap(96, 5, carinhaFeliz, 32, 32, SSD1306_WHITE);
 
     display.display();
@@ -413,7 +398,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
         Serial.println("- LED em modo automatico (triggers)");
     } else if (cmd == "manual") {
         modoManual = true;
-        corManual = corAtual;  // começa na cor que estava acesa
+        corManual = corAtual;
         Serial.println("- LED em modo manual");
     } else if (modoManual) {
         if (aplicaCor(cmd)) corManual = cmd;
@@ -432,7 +417,6 @@ void EnviaEstadoOutputMQTT() {
     if (millis() - ultimaPublicacaoEstado < INTERVALO_PUBLICACAO) return;
     ultimaPublicacaoEstado = millis();
 
-    // a = anomalias ativas, ex.: "temp:critico;luz:alerta" ou "ok"
     String alerta = "";
     for (int i = 0; i < QTD_ANOM; i++) {
         if (niveis[i] == NIVEL_OK) continue;
@@ -448,7 +432,6 @@ void EnviaEstadoOutputMQTT() {
 }
 
 void InitOutput() {
-    // Não usado mais — RGB inicializado no setup()
 }
 
 void reconnectMQTT() {
@@ -467,7 +450,7 @@ void reconnectMQTT() {
 }
 
 void handleLuminosity() {
-    const int potPin = 1;  // GPIO1 = ADC1_CH0 no ESP32-S3
+    const int potPin = 1;
     int sensorValue = analogRead(potPin);
     luminosidade = map(sensorValue, 0, 4095, 100, 0);
 
@@ -480,7 +463,7 @@ void handleLuminosity() {
 }
 
 Nivel classifica(float valor, const Faixa& f) {
-    if (isnan(valor)) return NIVEL_OK;  // sem leitura ainda
+    if (isnan(valor)) return NIVEL_OK;
     if (valor < f.critMin || valor > f.critMax) return NIVEL_CRITICO;
     if (valor < f.alertaMin || valor > f.alertaMax) return NIVEL_ALERTA;
     return NIVEL_OK;
@@ -513,24 +496,21 @@ void handleLED() {
         if (niveis[i] > pior) pior = niveis[i];
 
     if (pior == NIVEL_OK) {
-        // Tudo normal: verde fixo
         aplicaCor("green");
         corAtual = "green";
         return;
     }
 
-    // Anomalia: pisca amarelo (alerta) ou vermelho (crítico) até o valor voltar ao normal
     corAtual = (pior == NIVEL_CRITICO) ? "red" : "yellow";
     bool aceso = (millis() / INTERVALO_PISCA) % 2 == 0;
     aplicaCor(aceso ? corAtual : String("off"));
 }
 
 void handleBuzzer() {
-    static int somAtual = -1;  // -1 = buzzer parado
+    static int somAtual = -1;
     static uint8_t passo = 0;
     static unsigned long inicioPasso = 0;
 
-    // Próxima anomalia ativa depois de 'atual' (rodízio quando há mais de uma)
     auto proximaAtiva = [](int atual) {
         for (int k = 1; k <= QTD_ANOM; k++) {
             int i = (atual + k + QTD_ANOM) % QTD_ANOM;
