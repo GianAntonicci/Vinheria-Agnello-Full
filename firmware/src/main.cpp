@@ -24,11 +24,14 @@
 //Autor Rev10: Gianluca Antonicci
 //Rev11: 04-10-2026 Pinos ajustados para o ESP32-S3 (LED RGB, I2C do display e luminosidade)
 //Autor Rev11: Gianluca Antonicci
+//Rev12: 06-10-2026 Display OLED SSD1306 trocado pelo TFT touch 2.8" 240x320 (ILI9341 + XPT2046), com backlight no pino 18
+//Autor Rev12: Gianluca Antonicci
 #include <WiFi.h>
 #include <PubSubClient.h>
-#include <Wire.h>
+#include <SPI.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_ILI9341.h>
+#include <XPT2046_Touchscreen.h>
 #include <DHT.h>
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length);
@@ -39,16 +42,34 @@ void reconnectMQTT();
 void avaliaTriggers();
 void handleLED();
 void handleBuzzer();
+void handleDisplay();
+void handleTouch();
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-#define SCREEN_ADDRESS 0x3C
+// TFT e touch dividem o mesmo barramento SPI (T_CLK, T_DIN e T_DO ligados em SCK, MOSI e MISO)
+#define TFT_SCK   13
+#define TFT_MOSI  14
+#define TFT_MISO  21
+#define TFT_CS    5
+#define TFT_DC    6
+#define TFT_RST   7
+#define TFT_LED   18  // luz de fundo (backlight)
+#define TOUCH_CLK TFT_SCK   // T_CLK no mesmo fio do SCK (13)
+#define TOUCH_DIN TFT_MOSI  // T_DIN no mesmo fio do MOSI (14)
+#define TOUCH_DO  TFT_MISO  // T_DO no mesmo fio do MISO (21)
+#define TOUCH_CS  16
+#define TOUCH_IRQ 17
 #define DHTPIN 15
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Adafruit_ILI9341 display(TFT_CS, TFT_DC, TFT_RST);
+XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
+
+// Cores do display (RGB565)
+const uint16_t COR_FUNDO = ILI9341_BLACK;
+const uint16_t COR_TEXTO = ILI9341_WHITE;
+const uint16_t COR_OK    = ILI9341_GREEN;
+const uint16_t COR_ERRO  = ILI9341_RED;
 
 const uint8_t carinhaFeliz[] PROGMEM = {
   0x00, 0x00, 0x00, 0x00,
@@ -119,9 +140,9 @@ const unsigned long INTERVALO_PUBLICACAO = 1000;
 unsigned long ultimaPublicacaoEstado = 0;
 unsigned long ultimaPublicacaoLuz = 0;
 
-const char* default_SSID = "";
-const char* default_PASSWORD = "";
-const char* default_BROKER_MQTT = "";
+const char* default_SSID = "Galaxy S26 Ultra Gianluca";
+const char* default_PASSWORD = "1008100810";
+const char* default_BROKER_MQTT = "54.236.175.117";
 const int default_BROKER_PORT = 1883;
 const char* default_TOPICO_SUBSCRIBE = "/TEF/lamp001/cmd";
 const char* default_TOPICO_PUBLISH_1 = "/TEF/lamp001/attrs";
@@ -166,6 +187,45 @@ bool aplicaCor(const String& cor) {
     return true;
 }
 
+// Escreve uma linha de texto (tamanho 2, 16 px de altura) apagando o que havia antes,
+// para atualizar só aquele trecho sem limpar a tela inteira
+void escreveLinha(int y, const String& texto, uint16_t cor = COR_TEXTO) {
+    display.fillRect(0, y, display.width(), 16, COR_FUNDO);
+    display.setTextSize(2);
+    display.setTextColor(cor);
+    display.setCursor(10, y);
+    display.print(texto);
+}
+
+void telaMensagem(const String& titulo, const String& detalhe) {
+    display.fillScreen(COR_FUNDO);
+    escreveLinha(60, titulo);
+    escreveLinha(110, detalhe);
+}
+
+// drawBitmap do GFX não tem escala: cada pixel do bitmap vira um quadrado de 'escala' px
+void desenhaBitmapEscalado(int x, int y, const uint8_t* bitmap, int w, int h, int escala, uint16_t cor) {
+    int bytesPorLinha = (w + 7) / 8;
+    for (int j = 0; j < h; j++) {
+        for (int i = 0; i < w; i++) {
+            uint8_t byte = pgm_read_byte(&bitmap[j * bytesPorLinha + i / 8]);
+            if (byte & (0x80 >> (i % 8)))
+                display.fillRect(x + i * escala, y + j * escala, escala, escala, cor);
+        }
+    }
+}
+
+void initDisplay() {
+    pinMode(TFT_LED, OUTPUT);
+    digitalWrite(TFT_LED, HIGH);
+    SPI.begin(TFT_SCK, TFT_MISO, TFT_MOSI);
+    display.begin();
+    display.setRotation(1);  // paisagem: 320x240
+    display.fillScreen(COR_FUNDO);
+    touch.begin();
+    touch.setRotation(1);
+}
+
 void initSerial() {
     Serial.begin(115200);
 }
@@ -177,34 +237,17 @@ void initWiFi() {
     Serial.println(SSID);
     Serial.println("Aguarde");
 
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 4);
-    display.println(F("Conectando Wi-Fi..."));
-    display.setCursor(0, 28);
-    display.print(F("Rede: "));
-    display.println(SSID);
-    display.display();
+    telaMensagem("Conectando Wi-Fi...", "Rede: " + String(SSID));
     delay(1500);
 
     WiFi.begin(SSID, PASSWORD);
 
     int pontos = 0;
     while (WiFi.status() != WL_CONNECTED) {
-        display.clearDisplay();
-        display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
+        String aguarde = "Aguarde";
+        for (int i = 0; i < pontos; i++) aguarde += ".";
+        escreveLinha(160, aguarde);
 
-        display.setCursor(0, 4);
-        display.print(F("Rede: "));
-        display.println(SSID);
-
-        display.setCursor(0, 28);
-        display.print(F("Aguarde"));
-        for (int i = 0; i < pontos; i++) display.print(".");
-
-        display.display();
         pontos = (pontos + 1) % 4;
         delay(500);
         Serial.print(".");
@@ -214,18 +257,7 @@ void initWiFi() {
     Serial.print("Conectado com sucesso na rede ");
     Serial.println(SSID);
 
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-
-    display.setCursor(0, 4);
-    display.println(F("Wi-Fi conectado!"));
-
-    display.setCursor(0, 28);
-    display.print(F("Rede: "));
-    display.println(SSID);
-
-    display.display();
+    telaMensagem("Wi-Fi conectado!", "Rede: " + String(SSID));
     delay(3000);
 }
 
@@ -236,32 +268,14 @@ void initMQTT() {
     Serial.print("* Conectando ao Broker MQTT: ");
     Serial.println(BROKER_MQTT);
 
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 4);
-    display.println(F("Conectando MQTT..."));
-    display.setCursor(0, 28);
-    display.print(F("Broker: "));
-    display.println(BROKER_MQTT);
-    display.display();
+    telaMensagem("Conectando MQTT...", "Broker: " + String(BROKER_MQTT));
     delay(1500);
 
     int pontos = 0;
     while (!MQTT.connected()) {
-        display.clearDisplay();
-        display.setTextSize(1);
-        display.setTextColor(SSD1306_WHITE);
-
-        display.setCursor(0, 4);
-        display.print(F("Broker: "));
-        display.println(BROKER_MQTT);
-
-        display.setCursor(0, 28);
-        display.print(F("Aguarde"));
-        for (int i = 0; i < pontos; i++) display.print(".");
-
-        display.display();
+        String aguarde = "Aguarde";
+        for (int i = 0; i < pontos; i++) aguarde += ".";
+        escreveLinha(160, aguarde);
         pontos = (pontos + 1) % 4;
 
         Serial.print(".");
@@ -274,18 +288,7 @@ void initMQTT() {
         }
     }
 
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-
-    display.setCursor(0, 4);
-    display.println(F("MQTT conectado!"));
-
-    display.setCursor(0, 28);
-    display.print(F("Broker: "));
-    display.println(BROKER_MQTT);
-
-    display.display();
+    telaMensagem("MQTT conectado!", "Broker: " + String(BROKER_MQTT));
     delay(3000);
 }
 
@@ -317,18 +320,13 @@ void setup() {
 
     initSerial();
 
-    Wire.begin(8, 9);
-    if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-        Serial.println(F("Falha ao inicializar o SSD1309!"));
-        for (;;);
-    }
-    display.clearDisplay();
-    display.display();
+    initDisplay();
 
     initWiFi();
     initMQTT();
     delay(5000);
     MQTT.publish(TOPICO_PUBLISH_1, "s|off");
+    display.fillScreen(COR_FUNDO);
 }
 
 void loop() {
@@ -340,29 +338,46 @@ void loop() {
     handleLED();
     handleBuzzer();
     MQTT.loop();
+    handleDisplay();
+    handleTouch();
+}
 
-    display.clearDisplay();
+// O TFT não tem buffer como o OLED: redesenhar a tela inteira a cada loop é lento e pisca,
+// então só as linhas que mudaram são redesenhadas
+void handleDisplay() {
+    static bool primeiraVez = true;
+    static bool wifiAnterior = false;
+    static bool mqttAnterior = false;
 
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
+    bool wifiOk = WiFi.status() == WL_CONNECTED;
+    bool mqttOk = MQTT.connected();
 
-    display.setCursor(0, 8);
-    display.print(F("WiFi: "));
-    if (WiFi.status() == WL_CONNECTED)
-        display.println(F("Conectado"));
-    else
-        display.println(F("Desconectado"));
+    if (primeiraVez) {
+        desenhaBitmapEscalado(112, 110, carinhaFeliz, 32, 32, 3, COR_TEXTO);
+    }
+    if (primeiraVez || wifiOk != wifiAnterior) {
+        escreveLinha(30, wifiOk ? "WiFi: Conectado" : "WiFi: Desconectado", wifiOk ? COR_OK : COR_ERRO);
+        wifiAnterior = wifiOk;
+    }
+    if (primeiraVez || mqttOk != mqttAnterior) {
+        escreveLinha(60, mqttOk ? "MQTT: Conectado" : "MQTT: Desconectado", mqttOk ? COR_OK : COR_ERRO);
+        mqttAnterior = mqttOk;
+    }
+    primeiraVez = false;
+}
 
-    display.setCursor(0, 24);
-    display.print(F("MQTT: "));
-    if (MQTT.connected())
-        display.println(F("Conectado"));
-    else
-        display.println(F("Desconectado"));
-
-    display.drawBitmap(96, 5, carinhaFeliz, 32, 32, SSD1306_WHITE);
-
-    display.display();
+// Por enquanto o touch só informa no Serial a posição tocada (valores brutos do XPT2046,
+// de 0 a 4095), o que serve para calibrar a tela antes de criar botões
+void handleTouch() {
+    static bool tocando = false;
+    if (!touch.touched()) {
+        tocando = false;
+        return;
+    }
+    if (tocando) return;
+    tocando = true;
+    TS_Point p = touch.getPoint();
+    Serial.printf("- Toque em x=%d y=%d (pressao %d)\n", p.x, p.y, p.z);
 }
 
 void reconectWiFi() {
