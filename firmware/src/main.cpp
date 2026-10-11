@@ -26,11 +26,20 @@
 //Autor Rev11: Gianluca Antonicci
 //Rev12: 06-10-2026 Display OLED SSD1306 trocado pelo TFT touch 2.8" 240x320 (ILI9341 + XPT2046), com backlight no pino 18
 //Autor Rev12: Gianluca Antonicci
+//Rev13: 08-10-2026 Suporte ao touch capacitivo FT6206 (I2C, SDA 8 / SCL 9) do ILI9341 do Wokwi, escolhido pelo #define WOKWI
+//Autor Rev13: Gianluca Antonicci
+//Rev14: 11-10-2026 Relógio RTC (DS3231 na placa, DS1307 no Wokwi) no I2C SDA 8 / SCL 9, acertado pelo NTP quando há Wi-Fi; hora só no Serial
+//Autor Rev14: Gianluca Antonicci
+//Rev15: 11-10-2026 Removido o suporte ao Wokwi; código só para a placa física (touch XPT2046 e RTC DS3231)
+//Autor Rev15: Gianluca Antonicci
+
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
+#include <Wire.h>
+#include <RTClib.h>
 #include <XPT2046_Touchscreen.h>
 #include <DHT.h>
 
@@ -44,6 +53,7 @@ void handleLED();
 void handleBuzzer();
 void handleDisplay();
 void handleTouch();
+void handleRTC();
 
 // TFT e touch dividem o mesmo barramento SPI (T_CLK, T_DIN e T_DO ligados em SCK, MOSI e MISO)
 #define TFT_SCK   13
@@ -58,12 +68,24 @@ void handleTouch();
 #define TOUCH_DO  TFT_MISO  // T_DO no mesmo fio do MISO (21)
 #define TOUCH_CS  16
 #define TOUCH_IRQ 17
+// RTC DS3231 no I2C
+#define RTC_SDA 8
+#define RTC_SCL 9
 #define DHTPIN 15
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
 Adafruit_ILI9341 display(TFT_CS, TFT_DC, TFT_RST);
 XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
+
+// DS3231: bateria própria e mais preciso
+RTC_DS3231 rtc;
+bool rtcOk = false;
+const long FUSO_BRASILIA = -3 * 3600;  // UTC-3, sem horário de verão
+const unsigned long INTERVALO_NTP = 6UL * 3600 * 1000;  // reacerta o RTC a cada 6 h
+const unsigned long INTERVALO_HORA_SERIAL = 30000;
+unsigned long ultimoNTP = 0;
+unsigned long ultimaHoraSerial = 0;
 
 // Cores do display (RGB565)
 const uint16_t COR_FUNDO = ILI9341_BLACK;
@@ -226,6 +248,44 @@ void initDisplay() {
     touch.setRotation(1);
 }
 
+void initRTC() {
+    Wire.begin(RTC_SDA, RTC_SCL);
+    rtcOk = rtc.begin(&Wire);
+    if (!rtcOk) {
+        Serial.println("RTC nao encontrado!");
+        return;
+    }
+    // Sem hora guardada, usa a hora da compilação até o NTP acertar
+    if (rtc.lostPower()) rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+}
+
+// Acerta o RTC pela hora da internet (NTP). Sem Wi-Fi ou sem resposta, o RTC segue sozinho
+void sincronizaRTC() {
+    if (!rtcOk || WiFi.status() != WL_CONNECTED) return;
+    configTime(FUSO_BRASILIA, 0, "pool.ntp.org", "a.st1.ntp.br");
+    struct tm agora;
+    if (!getLocalTime(&agora, 5000)) {
+        Serial.println("Falha no NTP, mantendo a hora do RTC");
+        return;
+    }
+    rtc.adjust(DateTime(agora.tm_year + 1900, agora.tm_mon + 1, agora.tm_mday,
+                        agora.tm_hour, agora.tm_min, agora.tm_sec));
+    ultimoNTP = millis();
+    Serial.println("RTC acertado pelo NTP");
+}
+
+void handleRTC() {
+    if (millis() - ultimoNTP >= INTERVALO_NTP) {
+        ultimoNTP = millis();  // evita tentar de novo a cada loop se o NTP falhar
+        sincronizaRTC();
+    }
+    if (!rtcOk || millis() - ultimaHoraSerial < INTERVALO_HORA_SERIAL) return;
+    ultimaHoraSerial = millis();
+    DateTime agora = rtc.now();
+    Serial.printf("Hora: %02d/%02d/%04d %02d:%02d:%02d\n", agora.day(), agora.month(), agora.year(),
+                  agora.hour(), agora.minute(), agora.second());
+}
+
 void initSerial() {
     Serial.begin(115200);
 }
@@ -321,8 +381,10 @@ void setup() {
     initSerial();
 
     initDisplay();
+    initRTC();
 
     initWiFi();
+    sincronizaRTC();
     initMQTT();
     delay(5000);
     MQTT.publish(TOPICO_PUBLISH_1, "s|off");
@@ -340,6 +402,7 @@ void loop() {
     MQTT.loop();
     handleDisplay();
     handleTouch();
+    handleRTC();
 }
 
 // O TFT não tem buffer como o OLED: redesenhar a tela inteira a cada loop é lento e pisca,
@@ -366,8 +429,8 @@ void handleDisplay() {
     primeiraVez = false;
 }
 
-// Por enquanto o touch só informa no Serial a posição tocada (valores brutos do XPT2046,
-// de 0 a 4095), o que serve para calibrar a tela antes de criar botões
+// Por enquanto o touch só informa no Serial a posição tocada, o que serve para calibrar a tela
+// antes de criar botões. No XPT2046 os valores são brutos (0 a 4095)
 void handleTouch() {
     static bool tocando = false;
     if (!touch.touched()) {
