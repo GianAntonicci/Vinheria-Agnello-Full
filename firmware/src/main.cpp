@@ -242,7 +242,7 @@ void initDisplay() {
     digitalWrite(TFT_LED, HIGH);
     SPI.begin(TFT_SCK, TFT_MISO, TFT_MOSI);
     display.begin();
-    display.setRotation(1);  // paisagem: 320x240
+    display.setRotation(3);  // paisagem: 320x240
     display.fillScreen(COR_FUNDO);
     touch.begin();
     touch.setRotation(1);
