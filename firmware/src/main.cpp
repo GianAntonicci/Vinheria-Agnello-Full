@@ -32,6 +32,16 @@
 //Autor Rev14: Gianluca Antonicci
 //Rev15: 11-10-2026 Removido o suporte ao Wokwi; código só para a placa física (touch XPT2046 e RTC DS3231)
 //Autor Rev15: Gianluca Antonicci
+//Rev16: 15-10-2026 Menu principal (layout do Lopaka adaptado para a Adafruit ILI9341): hora do RTC, temperatura, luminosidade e umidade em tempo real, com ícones animados
+//Autor Rev16: Gianluca Antonicci
+//Rev17: 15-10-2026 Hora do menu cai para o relógio interno acertado pelo NTP quando o DS3231 não responde; RTC procurado de novo a cada 5 s com varredura do I2C no Serial
+//Autor Rev17: Gianluca Antonicci
+//Rev18: 15-10-2026 Varredura do I2C só na partida e com timeout curto (travava a tela sem o RTC); nova busca do RTC a cada 30 s
+//Autor Rev18: Gianluca Antonicci
+//Rev19: 15-10-2026 Partida mais rápida: removidas as esperas fixas antes de conectar e antes do menu; telas de conectado ficam 1 s
+//Autor Rev19: Gianluca Antonicci
+//Rev20: 15-10-2026 Removidas a varredura do I2C e a nova busca do RTC no loop: com o barramento travado cada tentativa levava ~1 s e a partida demorava 2 min
+//Autor Rev20: Gianluca Antonicci
 
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -42,6 +52,14 @@
 #include <RTClib.h>
 #include <XPT2046_Touchscreen.h>
 #include <DHT.h>
+#include <Fonts/FreeSans12pt7b.h>  // já vem com a Adafruit GFX
+
+// Ícones animados exportados pelo Lopaka (32x32, 28 quadros, 1 bit por pixel). Ficam em firmware/include/
+#include "down_arrow_32_32_28f.h"
+#include "gear_32_32_28f.h"
+#include "sun_weather_32_32_28f.h"
+#include "temperature_weather_32_32_28f.h"
+#include "windy_weather_32_32_28f.h"
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length);
 void VerificaConexoesWiFIEMQTT();
@@ -54,6 +72,7 @@ void handleBuzzer();
 void handleDisplay();
 void handleTouch();
 void handleRTC();
+bool horaAtual(int& hora, int& minuto);
 
 // TFT e touch dividem o mesmo barramento SPI (T_CLK, T_DIN e T_DO ligados em SCK, MOSI e MISO)
 #define TFT_SCK   13
@@ -92,41 +111,20 @@ const uint16_t COR_FUNDO = ILI9341_BLACK;
 const uint16_t COR_TEXTO = ILI9341_WHITE;
 const uint16_t COR_OK    = ILI9341_GREEN;
 const uint16_t COR_ERRO  = ILI9341_RED;
+const uint16_t COR_ALERTA = ILI9341_YELLOW;
+const uint16_t COR_HORA   = 0xFF47;  // amarelo claro do layout
+const uint16_t COR_BORDA  = 0xEF7D;  // cinza claro do layout
 
-const uint8_t carinhaFeliz[] PROGMEM = {
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x1F, 0xF8, 0x00,
-  0x00, 0x7C, 0x3E, 0x00,
-  0x01, 0xC0, 0x03, 0x80,
-  0x03, 0x80, 0x01, 0xC0,
-  0x06, 0x00, 0x00, 0x60,
-  0x0C, 0x00, 0x00, 0x30,
-  0x18, 0x00, 0x00, 0x18,
-  0x18, 0x00, 0x00, 0x18,
-  0x30, 0x70, 0x0E, 0x0C,
-  0x20, 0xF8, 0x1F, 0x04,
-  0x60, 0xF8, 0x1F, 0x06,
-  0x60, 0xF8, 0x1F, 0x06,
-  0x60, 0x70, 0x0E, 0x06,
-  0x40, 0x00, 0x00, 0x02,
-  0x40, 0x00, 0x00, 0x02,
-  0x40, 0x00, 0x00, 0x02,
-  0x41, 0x00, 0x00, 0x82,
-  0x61, 0x80, 0x01, 0x86,
-  0x60, 0x80, 0x01, 0x06,
-  0x60, 0xC0, 0x03, 0x06,
-  0x20, 0x60, 0x06, 0x04,
-  0x30, 0x38, 0x1C, 0x0C,
-  0x18, 0x1F, 0xF8, 0x18,
-  0x18, 0x07, 0xE0, 0x18,
-  0x0C, 0x01, 0x80, 0x30,
-  0x06, 0x00, 0x00, 0x60,
-  0x03, 0x80, 0x01, 0xC0,
-  0x01, 0xC0, 0x03, 0x80,
-  0x00, 0x7C, 0x3E, 0x00,
-  0x00, 0x1F, 0xF8, 0x00,
-  0x00, 0x00, 0x00, 0x00
-};
+// Posições do menu principal (vindas do Lopaka, tela 320x240)
+const int BARRA_X = 41;
+const int BARRA_W = 246;
+const int BARRA_H = 17;
+const int BARRA_Y_TEMP = 90;
+const int BARRA_Y_LUZ  = 136;
+const int BARRA_Y_UMID = 183;
+const unsigned long INTERVALO_QUADRO = 42;   // ~24 quadros por segundo
+const unsigned long INTERVALO_VALORES = 500;  // barras e textos
+
 
 const int PIN_R = 10;
 const int PIN_G = 11;
@@ -225,16 +223,86 @@ void telaMensagem(const String& titulo, const String& detalhe) {
     escreveLinha(110, detalhe);
 }
 
-// drawBitmap do GFX não tem escala: cada pixel do bitmap vira um quadrado de 'escala' px
-void desenhaBitmapEscalado(int x, int y, const uint8_t* bitmap, int w, int h, int escala, uint16_t cor) {
-    int bytesPorLinha = (w + 7) / 8;
-    for (int j = 0; j < h; j++) {
-        for (int i = 0; i < w; i++) {
-            uint8_t byte = pgm_read_byte(&bitmap[j * bytesPorLinha + i / 8]);
-            if (byte & (0x80 >> (i % 8)))
-                display.fillRect(x + i * escala, y + j * escala, escala, escala, cor);
-        }
+// Desenha um quadro 32x32 de 1 bit montando os pixels num buffer e enviando de uma vez:
+// o drawBitmap da GFX manda pixel a pixel e fica lento demais para animar 5 ícones
+void desenhaIcone(int x, int y, const uint8_t* quadro, uint16_t cor) {
+    static uint16_t buf[32 * 32];
+    for (int i = 0; i < 32 * 32; i++) {
+        uint8_t b = pgm_read_byte(&quadro[i / 8]);
+        buf[i] = (b & (0x80 >> (i % 8))) ? cor : COR_FUNDO;
     }
+    display.drawRGBBitmap(x, y, buf, 32, 32);
+}
+
+void desenhaAnimacoes() {
+    int q = millis() / INTERVALO_QUADRO % 28;
+    desenhaIcone(0, 83, (const uint8_t*)temperature_weather_32_32_28f_frames[q], 0x05FA);
+    desenhaIcone(0, 128, (const uint8_t*)sun_weather_32_32_28f_frames[q], 0xFC00);
+    desenhaIcone(1, 174, (const uint8_t*)windy_weather_32_32_28f_frames[q], 0x3A96);
+    // Seta e engrenagem: só desenhadas por enquanto; a engrenagem vai abrir as configurações
+    desenhaIcone(0, 0, (const uint8_t*)down_arrow_32_32_28f_frames[q], COR_BORDA);
+    desenhaIcone(288, 0, (const uint8_t*)gear_32_32_28f_frames[q], COR_BORDA);
+}
+
+// Hora HH:MM centralizada no topo, entre a seta e a engrenagem
+void desenhaHora() {
+    char hora[6] = "--:--";
+    int hh, mm;
+    if (horaAtual(hh, mm)) snprintf(hora, sizeof(hora), "%02d:%02d", hh, mm);
+    display.setFont(&FreeSans12pt7b);
+    display.setTextSize(2);
+    display.setTextColor(COR_HORA);
+    int16_t x1, y1;
+    uint16_t w, h;
+    display.getTextBounds(hora, 0, 0, &x1, &y1, &w, &h);
+    // Fonte livre não apaga o fundo sozinha: limpa a faixa entre os ícones
+    display.fillRect(34, 10, 252, 56, COR_FUNDO);
+    // No Lopaka o texto é posicionado pelo topo (y 18); na GFX o cursor é a linha de base
+    display.setCursor((display.width() - w) / 2 - x1, 18 - y1);
+    display.print(hora);
+    display.setFont(NULL);
+}
+
+uint16_t corDoNivel(Nivel n) {
+    if (n == NIVEL_CRITICO) return COR_ERRO;
+    if (n == NIVEL_ALERTA) return COR_ALERTA;
+    return COR_OK;
+}
+
+// Texto acima da barra e preenchimento proporcional ao valor (vMin..vMax), na cor do trigger
+void desenhaBarra(int y, const String& texto, float valor, float vMin, float vMax, Nivel nivel) {
+    display.setFont(NULL);
+    display.setTextSize(1);
+    display.setTextColor(COR_TEXTO, COR_FUNDO);
+    display.fillRect(BARRA_X, y - 11, BARRA_W, 8, COR_FUNDO);
+    display.setCursor(BARRA_X + 4, y - 11);
+    display.print(texto);
+
+    const int interno = BARRA_W - 4;
+    int largura = 0;
+    if (!isnan(valor)) largura = constrain((valor - vMin) / (vMax - vMin) * interno, 0, interno);
+    if (largura > 0 && largura < 12) largura = 12;  // abaixo disso o canto arredondado deforma
+    display.fillRoundRect(BARRA_X + 2, y + 2, interno, BARRA_H - 4, 6, COR_FUNDO);
+    if (largura > 0)
+        display.fillRoundRect(BARRA_X + 2, y + 2, largura, BARRA_H - 4, 6, corDoNivel(nivel));
+}
+
+void desenhaValores() {
+    String t = isnan(temperatura) ? String("--") : String(temperatura, 1);
+    String h = isnan(umidade) ? String("--") : String(umidade, 1);
+    desenhaBarra(BARRA_Y_TEMP, "Temperatura: " + t + " \xF7" "C", temperatura, 0, 40, niveis[ANOM_TEMP]);
+    desenhaBarra(BARRA_Y_LUZ, "Luminosidade: " + String(luminosidade) + " %", luminosidade, 0, 100, niveis[ANOM_LUZ]);
+    desenhaBarra(BARRA_Y_UMID, "Umidade: " + h + " %", umidade, 0, 100, niveis[ANOM_UMID]);
+}
+
+void desenhaMenu() {
+    display.fillScreen(COR_FUNDO);
+    display.drawRoundRect(BARRA_X, BARRA_Y_TEMP, BARRA_W, BARRA_H, 8, COR_BORDA);
+    display.drawRoundRect(BARRA_X, BARRA_Y_LUZ, BARRA_W, BARRA_H, 8, COR_BORDA);
+    display.drawRoundRect(BARRA_X, BARRA_Y_UMID, BARRA_W, BARRA_H, 8, COR_BORDA);
+    desenhaHora();
+    desenhaValores();
+    desenhaAnimacoes();
 }
 
 void initDisplay() {
@@ -242,35 +310,60 @@ void initDisplay() {
     digitalWrite(TFT_LED, HIGH);
     SPI.begin(TFT_SCK, TFT_MISO, TFT_MOSI);
     display.begin();
-    display.setRotation(3);  // paisagem: 320x240
+    display.setRotation(3);  // paisagem invertida: 320x240
+    display.cp437(true);     // caractere 0xF7 = símbolo de grau
     display.fillScreen(COR_FUNDO);
     touch.begin();
-    touch.setRotation(1);
+    touch.setRotation(3);   // igual à do display, para as coordenadas do toque baterem com a tela
 }
 
 void initRTC() {
     Wire.begin(RTC_SDA, RTC_SCL);
+    Wire.setTimeOut(10);
+    // Sem o RTC (ou com o I2C travado) só tenta uma vez: cada tentativa pode levar ~1 s.
+    // Nesse caso a hora do menu vem do relógio interno acertado pelo NTP
     rtcOk = rtc.begin(&Wire);
     if (!rtcOk) {
-        Serial.println("RTC nao encontrado!");
+        Serial.println("RTC nao encontrado! Confira SDA 8, SCL 9, VCC e GND do DS3231");
         return;
     }
+    Serial.println("RTC DS3231 encontrado");
     // Sem hora guardada, usa a hora da compilação até o NTP acertar
     if (rtc.lostPower()) rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 }
 
+// Hora para o display: do DS3231 ou, sem ele, do relógio interno do ESP32 acertado pelo NTP
+bool horaAtual(int& hora, int& minuto) {
+    if (rtcOk) {
+        DateTime agora = rtc.now();
+        hora = agora.hour();
+        minuto = agora.minute();
+        return true;
+    }
+    struct tm agora;
+    if (!getLocalTime(&agora, 0)) return false;  // relógio interno ainda não acertado
+    hora = agora.tm_hour;
+    minuto = agora.tm_min;
+    return true;
+}
+
 // Acerta o RTC pela hora da internet (NTP). Sem Wi-Fi ou sem resposta, o RTC segue sozinho
 void sincronizaRTC() {
-    if (!rtcOk || WiFi.status() != WL_CONNECTED) return;
+    if (WiFi.status() != WL_CONNECTED) return;
+    // Acerta também o relógio interno do ESP32, usado quando o RTC não responde
     configTime(FUSO_BRASILIA, 0, "pool.ntp.org", "a.st1.ntp.br");
     struct tm agora;
     if (!getLocalTime(&agora, 5000)) {
         Serial.println("Falha no NTP, mantendo a hora do RTC");
         return;
     }
+    ultimoNTP = millis();
+    if (!rtcOk) {
+        Serial.println("Relogio interno acertado pelo NTP (sem RTC)");
+        return;
+    }
     rtc.adjust(DateTime(agora.tm_year + 1900, agora.tm_mon + 1, agora.tm_mday,
                         agora.tm_hour, agora.tm_min, agora.tm_sec));
-    ultimoNTP = millis();
     Serial.println("RTC acertado pelo NTP");
 }
 
@@ -298,7 +391,6 @@ void initWiFi() {
     Serial.println("Aguarde");
 
     telaMensagem("Conectando Wi-Fi...", "Rede: " + String(SSID));
-    delay(1500);
 
     WiFi.begin(SSID, PASSWORD);
 
@@ -318,7 +410,7 @@ void initWiFi() {
     Serial.println(SSID);
 
     telaMensagem("Wi-Fi conectado!", "Rede: " + String(SSID));
-    delay(3000);
+    delay(1000);
 }
 
 void initMQTT() {
@@ -329,7 +421,6 @@ void initMQTT() {
     Serial.println(BROKER_MQTT);
 
     telaMensagem("Conectando MQTT...", "Broker: " + String(BROKER_MQTT));
-    delay(1500);
 
     int pontos = 0;
     while (!MQTT.connected()) {
@@ -349,7 +440,7 @@ void initMQTT() {
     }
 
     telaMensagem("MQTT conectado!", "Broker: " + String(BROKER_MQTT));
-    delay(3000);
+    delay(1000);
 }
 
 void handleDHT() {
@@ -384,11 +475,11 @@ void setup() {
     initRTC();
 
     initWiFi();
+    telaMensagem("Acertando a hora...", "Servidor: pool.ntp.org");  // o NTP pode levar alguns segundos
     sincronizaRTC();
     initMQTT();
-    delay(5000);
     MQTT.publish(TOPICO_PUBLISH_1, "s|off");
-    display.fillScreen(COR_FUNDO);
+    desenhaMenu();
 }
 
 void loop() {
@@ -405,28 +496,45 @@ void loop() {
     handleRTC();
 }
 
-// O TFT não tem buffer como o OLED: redesenhar a tela inteira a cada loop é lento e pisca,
-// então só as linhas que mudaram são redesenhadas
+// O TFT não tem buffer: redesenhar a tela inteira a cada loop é lento e pisca,
+// então cada parte do menu é redesenhada só quando precisa
 void handleDisplay() {
-    static bool primeiraVez = true;
-    static bool wifiAnterior = false;
-    static bool mqttAnterior = false;
+    static unsigned long ultimoQuadro = 0;
+    static unsigned long ultimosValores = 0;
+    static unsigned long ultimaLeituraHora = 0;
+    static int minutoAnterior = -1;
+    static float tempAnterior = NAN, umidAnterior = NAN;
+    static int luzAnterior = -1;
+    static Nivel niveisAnteriores[QTD_ANOM] = { NIVEL_OK, NIVEL_OK, NIVEL_OK };
 
-    bool wifiOk = WiFi.status() == WL_CONNECTED;
-    bool mqttOk = MQTT.connected();
+    if (millis() - ultimoQuadro >= INTERVALO_QUADRO) {
+        ultimoQuadro = millis();
+        desenhaAnimacoes();
+    }
 
-    if (primeiraVez) {
-        desenhaBitmapEscalado(112, 110, carinhaFeliz, 32, 32, 3, COR_TEXTO);
+    // Lê a hora só uma vez por segundo para não ocupar o I2C a cada loop
+    if (millis() - ultimaLeituraHora >= 1000) {
+        ultimaLeituraHora = millis();
+        int hora, minuto = -1;
+        horaAtual(hora, minuto);
+        if (minuto != minutoAnterior) {
+            minutoAnterior = minuto;
+            desenhaHora();
+        }
     }
-    if (primeiraVez || wifiOk != wifiAnterior) {
-        escreveLinha(30, wifiOk ? "WiFi: Conectado" : "WiFi: Desconectado", wifiOk ? COR_OK : COR_ERRO);
-        wifiAnterior = wifiOk;
-    }
-    if (primeiraVez || mqttOk != mqttAnterior) {
-        escreveLinha(60, mqttOk ? "MQTT: Conectado" : "MQTT: Desconectado", mqttOk ? COR_OK : COR_ERRO);
-        mqttAnterior = mqttOk;
-    }
-    primeiraVez = false;
+
+    if (millis() - ultimosValores < INTERVALO_VALORES) return;
+    ultimosValores = millis();
+    bool mudou = luminosidade != luzAnterior
+        || memcmp(niveis, niveisAnteriores, sizeof(niveis)) != 0
+        || !(temperatura == tempAnterior || (isnan(temperatura) && isnan(tempAnterior)))
+        || !(umidade == umidAnterior || (isnan(umidade) && isnan(umidAnterior)));
+    if (!mudou) return;
+    luzAnterior = luminosidade;
+    tempAnterior = temperatura;
+    umidAnterior = umidade;
+    memcpy(niveisAnteriores, niveis, sizeof(niveis));
+    desenhaValores();
 }
 
 // Por enquanto o touch só informa no Serial a posição tocada, o que serve para calibrar a tela
