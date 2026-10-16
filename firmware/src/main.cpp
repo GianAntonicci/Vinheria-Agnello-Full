@@ -42,6 +42,28 @@
 //Autor Rev19: Gianluca Antonicci
 //Rev20: 15-10-2026 Removidas a varredura do I2C e a nova busca do RTC no loop: com o barramento travado cada tentativa levava ~1 s e a partida demorava 2 min
 //Autor Rev20: Gianluca Antonicci
+//Rev21: 15-10-2026 Tela de configurações (layout do Lopaka) aberta pela engrenagem: tema claro/escuro e buzzer mudo, salvos na memória flash; toque mapeado para pixels da tela
+//Autor Rev21: Gianluca Antonicci
+//Rev22: 15-10-2026 Leituras inválidas do touch (4095, chip sem responder) são ignoradas
+//Autor Rev22: Gianluca Antonicci
+//Rev23: 16-10-2026 Touch XPT2046 num barramento SPI próprio (HSPI: T_CLK 39, T_DO 40, T_DIN 41), separado do display
+//Autor Rev23: Gianluca Antonicci
+//Rev24: 16-10-2026 Leitura do XPT2046 feita direto no código (a biblioteca instalada não aceita outro SPI)
+//Autor Rev24: Gianluca Antonicci
+//Rev25: 16-10-2026 SPI do touch feito por software (bit-bang) nos mesmos pinos, para descartar o periférico HSPI
+//Autor Rev25: Gianluca Antonicci
+//Rev26: 16-10-2026 Diagnóstico do touch na partida (nível do T_DO e leitura do sensor de temperatura interno do XPT2046)
+//Autor Rev26: Gianluca Antonicci
+//Rev27: 16-10-2026 Display trocado pelo ILI9488 de 4" (480x320) com a biblioteca Arduino_GFX; telas de 320x240 centralizadas com deslocamento OX/OY
+//Autor Rev27: Gianluca Antonicci
+//Rev28: 16-10-2026 T_CS do touch passado do GPIO 16 para o 21 (livre desde que o MISO do display saiu)
+//Autor Rev28: Gianluca Antonicci
+//Rev29: 16-10-2026 Volta ao display de 2,8" (ILI9341, Adafruit GFX); mantidos o touch por software e o T_CS no 21
+//Autor Rev29: Gianluca Antonicci
+//Rev30: 16-10-2026 MISO do SPI do display num pino livre (47): com -1 o core usava o padrão do S3 (GPIO 13), o mesmo do SCK, e a tela ficava branca
+//Autor Rev30: Gianluca Antonicci
+//Rev31: 16-10-2026 Eixos horizontal e vertical do touch invertidos para bater com a rotação 3 do display
+//Autor Rev31: Gianluca Antonicci
 
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -50,9 +72,10 @@
 #include <Adafruit_ILI9341.h>
 #include <Wire.h>
 #include <RTClib.h>
-#include <XPT2046_Touchscreen.h>
 #include <DHT.h>
-#include <Fonts/FreeSans12pt7b.h>  // já vem com a Adafruit GFX
+#include <Preferences.h>
+#include <Fonts/FreeSans12pt7b.h>      // já vem com a Adafruit GFX
+#include <Fonts/FreeMonoBold12pt7b.h>
 
 // Ícones animados exportados pelo Lopaka (32x32, 28 quadros, 1 bit por pixel). Ficam em firmware/include/
 #include "down_arrow_32_32_28f.h"
@@ -60,6 +83,9 @@
 #include "sun_weather_32_32_28f.h"
 #include "temperature_weather_32_32_28f.h"
 #include "windy_weather_32_32_28f.h"
+#include "image_arrow_right_bits.h"
+#include "mute_32_32_28f.h"
+#include "toggle_32_32_28f.h"
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length);
 void VerificaConexoesWiFIEMQTT();
@@ -70,22 +96,25 @@ void avaliaTriggers();
 void handleLED();
 void handleBuzzer();
 void handleDisplay();
+void handleDisplayMenu();
+void desenhaMenu();
 void handleTouch();
 void handleRTC();
 bool horaAtual(int& hora, int& minuto);
 
-// TFT e touch dividem o mesmo barramento SPI (T_CLK, T_DIN e T_DO ligados em SCK, MOSI e MISO)
+// Display no SPI padrão. O touch tem fios só dele, com SPI feito por software:
+// dividindo o barramento com o display ele só devolvia 4095
 #define TFT_SCK   13
 #define TFT_MOSI  14
-#define TFT_MISO  21
 #define TFT_CS    5
 #define TFT_DC    6
 #define TFT_RST   7
 #define TFT_LED   18  // luz de fundo (backlight)
-#define TOUCH_CLK TFT_SCK   // T_CLK no mesmo fio do SCK (13)
-#define TOUCH_DIN TFT_MOSI  // T_DIN no mesmo fio do MOSI (14)
-#define TOUCH_DO  TFT_MISO  // T_DO no mesmo fio do MISO (21)
-#define TOUCH_CS  16
+#define TFT_MISO  47  // sem fio: o display só recebe dados, mas o SPI precisa de um pino que não seja o 13
+#define TOUCH_CLK 39
+#define TOUCH_DO  40
+#define TOUCH_DIN 41
+#define TOUCH_CS  21  // no 16 o XPT2046 nunca respondeu, em dois módulos diferentes
 #define TOUCH_IRQ 17
 // RTC DS3231 no I2C
 #define RTC_SDA 8
@@ -94,8 +123,60 @@ bool horaAtual(int& hora, int& minuto);
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
+// Só escrita no display: o SDO(MISO) dele fica sem ligar
 Adafruit_ILI9341 display(TFT_CS, TFT_DC, TFT_RST);
-XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
+
+// Deslocamento das telas do Lopaka (320x240). Zero no display de 2,8"; num display maior centraliza
+const int OX = 0;
+const int OY = 0;
+
+// Leitura direta do XPT2046. Comandos com os 2 bits finais em 0: entre as leituras o chip
+// desliga e deixa o T_IRQ ativo (vai a LOW quando a tela é tocada)
+const uint8_t XPT_X  = 0xD0;
+const uint8_t XPT_Y  = 0x90;
+const uint8_t XPT_Z1 = 0xB0;
+const uint8_t XPT_Z2 = 0xC0;
+const int PRESSAO_MINIMA = 400;
+
+// SPI por software: o XPT2046 aceita até 2,5 MHz e o digitalWrite fica bem abaixo disso
+uint8_t trocaByteXPT(uint8_t envia) {
+    uint8_t recebe = 0;
+    for (int i = 7; i >= 0; i--) {
+        digitalWrite(TOUCH_DIN, (envia >> i) & 1);
+        delayMicroseconds(1);
+        digitalWrite(TOUCH_CLK, HIGH);
+        delayMicroseconds(1);
+        recebe = (recebe << 1) | digitalRead(TOUCH_DO);
+        digitalWrite(TOUCH_CLK, LOW);
+    }
+    return recebe;
+}
+
+uint16_t leXPT(uint8_t comando) {
+    trocaByteXPT(comando);
+    delayMicroseconds(2);  // tempo de conversão
+    uint16_t alto = trocaByteXPT(0);
+    uint16_t baixo = trocaByteXPT(0);
+    return ((alto << 8) | baixo) >> 3;  // resultado de 12 bits
+}
+
+// Devolve true se há toque, com x, y brutos (0 a 4095) e a pressão z
+bool leToque(int& x, int& y, int& z) {
+    if (digitalRead(TOUCH_IRQ) == HIGH) return false;
+    digitalWrite(TOUCH_CS, LOW);
+    int z1 = leXPT(XPT_Z1);
+    int z2 = leXPT(XPT_Z2);
+    z = z1 + 4095 - z2;
+    long somaX = 0, somaY = 0;
+    for (int i = 0; i < 4; i++) {  // média de 4 leituras, o touch resistivo oscila
+        somaX += leXPT(XPT_X);
+        somaY += leXPT(XPT_Y);
+    }
+    digitalWrite(TOUCH_CS, HIGH);
+    x = somaX / 4;
+    y = somaY / 4;
+    return z >= PRESSAO_MINIMA;
+}
 
 // DS3231: bateria própria e mais preciso
 RTC_DS3231 rtc;
@@ -106,22 +187,44 @@ const unsigned long INTERVALO_HORA_SERIAL = 30000;
 unsigned long ultimoNTP = 0;
 unsigned long ultimaHoraSerial = 0;
 
-// Cores do display (RGB565)
-const uint16_t COR_FUNDO = ILI9341_BLACK;
-const uint16_t COR_TEXTO = ILI9341_WHITE;
-const uint16_t COR_OK    = ILI9341_GREEN;
-const uint16_t COR_ERRO  = ILI9341_RED;
-const uint16_t COR_ALERTA = ILI9341_YELLOW;
-const uint16_t COR_HORA   = 0xFF47;  // amarelo claro do layout
-const uint16_t COR_BORDA  = 0xEF7D;  // cinza claro do layout
+// Cores do display (RGB565). Fundo, texto, borda e hora mudam com o tema (aplicaTema)
+uint16_t COR_FUNDO = 0x0000;
+uint16_t COR_TEXTO = 0xFFFF;
+uint16_t COR_HORA  = 0xFF47;  // amarelo claro do layout
+uint16_t COR_BORDA = 0xEF7D;  // cinza claro do layout
+const uint16_t COR_OK    = 0x07E0;
+const uint16_t COR_ERRO  = 0xF800;
+const uint16_t COR_ALERTA = 0xFFE0;
+
+// Configurações do usuário, guardadas na flash (Preferences) para valerem depois de religar
+Preferences prefs;
+bool temaClaro = false;
+bool buzzerMudo = false;
+
+enum Tela { TELA_MENU, TELA_CONFIG };
+Tela telaAtual = TELA_MENU;
+
+// Calibração do touch: valores brutos do XPT2046 nos cantos da tela (veja o Serial ao tocar)
+// Os dois eixos invertidos: com a rotação 3 o valor bruto cresce da direita para a esquerda e de baixo para cima
+const int TOUCH_X_MIN = 3800;
+const int TOUCH_X_MAX = 300;
+const int TOUCH_Y_MIN = 3800;
+const int TOUCH_Y_MAX = 300;
+
+// Ícones animados das configurações: em vez de girar sem parar, vão do quadro 0 ao último
+// quando a opção liga e voltam quando desliga. Se ficar invertido, troque estes valores
+const int QUADRO_DESLIGADO = 0;
+const int QUADRO_LIGADO = 27;
+int quadroTema = QUADRO_DESLIGADO;
+int quadroAudio = QUADRO_DESLIGADO;
 
 // Posições do menu principal (vindas do Lopaka, tela 320x240)
-const int BARRA_X = 41;
+const int BARRA_X = 41 + OX;
 const int BARRA_W = 246;
 const int BARRA_H = 17;
-const int BARRA_Y_TEMP = 90;
-const int BARRA_Y_LUZ  = 136;
-const int BARRA_Y_UMID = 183;
+const int BARRA_Y_TEMP = 90 + OY;
+const int BARRA_Y_LUZ  = 136 + OY;
+const int BARRA_Y_UMID = 183 + OY;
 const unsigned long INTERVALO_QUADRO = 42;   // ~24 quadros por segundo
 const unsigned long INTERVALO_VALORES = 500;  // barras e textos
 
@@ -225,13 +328,14 @@ void telaMensagem(const String& titulo, const String& detalhe) {
 
 // Desenha um quadro 32x32 de 1 bit montando os pixels num buffer e enviando de uma vez:
 // o drawBitmap da GFX manda pixel a pixel e fica lento demais para animar 5 ícones
+// x e y nas coordenadas do Lopaka (320x240); o deslocamento para o centro é somado aqui
 void desenhaIcone(int x, int y, const uint8_t* quadro, uint16_t cor) {
     static uint16_t buf[32 * 32];
     for (int i = 0; i < 32 * 32; i++) {
         uint8_t b = pgm_read_byte(&quadro[i / 8]);
         buf[i] = (b & (0x80 >> (i % 8))) ? cor : COR_FUNDO;
     }
-    display.drawRGBBitmap(x, y, buf, 32, 32);
+    display.drawRGBBitmap(x + OX, y + OY, buf, 32, 32);
 }
 
 void desenhaAnimacoes() {
@@ -239,7 +343,7 @@ void desenhaAnimacoes() {
     desenhaIcone(0, 83, (const uint8_t*)temperature_weather_32_32_28f_frames[q], 0x05FA);
     desenhaIcone(0, 128, (const uint8_t*)sun_weather_32_32_28f_frames[q], 0xFC00);
     desenhaIcone(1, 174, (const uint8_t*)windy_weather_32_32_28f_frames[q], 0x3A96);
-    // Seta e engrenagem: só desenhadas por enquanto; a engrenagem vai abrir as configurações
+    // Seta (ainda sem função) e engrenagem (abre as configurações)
     desenhaIcone(0, 0, (const uint8_t*)down_arrow_32_32_28f_frames[q], COR_BORDA);
     desenhaIcone(288, 0, (const uint8_t*)gear_32_32_28f_frames[q], COR_BORDA);
 }
@@ -256,11 +360,11 @@ void desenhaHora() {
     uint16_t w, h;
     display.getTextBounds(hora, 0, 0, &x1, &y1, &w, &h);
     // Fonte livre não apaga o fundo sozinha: limpa a faixa entre os ícones
-    display.fillRect(34, 10, 252, 56, COR_FUNDO);
+    display.fillRect(34 + OX, 10 + OY, 252, 56, COR_FUNDO);
     // No Lopaka o texto é posicionado pelo topo (y 18); na GFX o cursor é a linha de base
-    display.setCursor((display.width() - w) / 2 - x1, 18 - y1);
+    display.setCursor((display.width() - w) / 2 - x1, 18 + OY - y1);
     display.print(hora);
-    display.setFont(NULL);
+    display.setFont((const GFXfont*)NULL);
 }
 
 uint16_t corDoNivel(Nivel n) {
@@ -271,7 +375,7 @@ uint16_t corDoNivel(Nivel n) {
 
 // Texto acima da barra e preenchimento proporcional ao valor (vMin..vMax), na cor do trigger
 void desenhaBarra(int y, const String& texto, float valor, float vMin, float vMax, Nivel nivel) {
-    display.setFont(NULL);
+    display.setFont((const GFXfont*)NULL);
     display.setTextSize(1);
     display.setTextColor(COR_TEXTO, COR_FUNDO);
     display.fillRect(BARRA_X, y - 11, BARRA_W, 8, COR_FUNDO);
@@ -290,7 +394,7 @@ void desenhaBarra(int y, const String& texto, float valor, float vMin, float vMa
 void desenhaValores() {
     String t = isnan(temperatura) ? String("--") : String(temperatura, 1);
     String h = isnan(umidade) ? String("--") : String(umidade, 1);
-    desenhaBarra(BARRA_Y_TEMP, "Temperatura: " + t + " \xF7" "C", temperatura, 0, 40, niveis[ANOM_TEMP]);
+    desenhaBarra(BARRA_Y_TEMP, "Temperatura: " + t + " \xF7" "C"  /* 0xF7 = grau na fonte padrão da GFX */, temperatura, 0, 40, niveis[ANOM_TEMP]);
     desenhaBarra(BARRA_Y_LUZ, "Luminosidade: " + String(luminosidade) + " %", luminosidade, 0, 100, niveis[ANOM_LUZ]);
     desenhaBarra(BARRA_Y_UMID, "Umidade: " + h + " %", umidade, 0, 100, niveis[ANOM_UMID]);
 }
@@ -305,16 +409,101 @@ void desenhaMenu() {
     desenhaAnimacoes();
 }
 
+void aplicaTema() {
+    if (temaClaro) {
+        COR_FUNDO = 0xFFFF;
+        COR_TEXTO = 0x0000;
+        COR_HORA  = 0xC280;  // laranja escuro, legível no branco
+        COR_BORDA = 0x7BEF;  // cinza médio
+    } else {
+        COR_FUNDO = 0x0000;
+        COR_TEXTO = 0xFFFF;
+        COR_HORA  = 0xFF47;
+        COR_BORDA = 0xEF7D;
+    }
+}
+
+void carregaConfiguracoes() {
+    prefs.begin("vinheria", false);
+    temaClaro = prefs.getBool("temaClaro", false);
+    buzzerMudo = prefs.getBool("mudo", false);
+    aplicaTema();
+    quadroTema = temaClaro ? QUADRO_LIGADO : QUADRO_DESLIGADO;
+    quadroAudio = buzzerMudo ? QUADRO_LIGADO : QUADRO_DESLIGADO;
+}
+
+// O Lopaka posiciona o texto pelo topo; na GFX, com fonte livre, o cursor é a linha de base
+void textoPeloTopo(const char* texto, int x, int y) {
+    int16_t x1, y1;
+    uint16_t w, h;
+    display.getTextBounds(texto, 0, 0, &x1, &y1, &w, &h);
+    display.setCursor(x + OX - x1, y + OY - y1);
+    display.print(texto);
+}
+
+void desenhaIconesConfig() {
+    desenhaIcone(260, 47, (const uint8_t*)toggle_32_32_28f_frames[quadroTema], COR_TEXTO);
+    desenhaIcone(263, 84, (const uint8_t*)mute_32_32_28f_frames[quadroAudio], COR_TEXTO);
+}
+
+void desenhaConfig() {
+    display.fillScreen(COR_FUNDO);
+    display.setFont(&FreeMonoBold12pt7b);
+    display.setTextSize(1);
+    display.setTextColor(COR_TEXTO);
+    textoPeloTopo("WiFi/MQTT", 10, 18);
+    textoPeloTopo("Tema", 10, 53);
+    textoPeloTopo("Audio", 9, 90);
+    // Fora do layout do Lopaka: a tela não tinha como voltar ao menu
+    textoPeloTopo("< Voltar", 10, 205);
+    display.setFont((const GFXfont*)NULL);
+    display.drawBitmap(260 + OX, 15 + OY, image_arrow_right_bits, 35, 25, COR_TEXTO);
+    desenhaIconesConfig();
+}
+
+void abreTela(Tela tela) {
+    telaAtual = tela;
+    if (tela == TELA_MENU) desenhaMenu();
+    else desenhaConfig();
+}
+
+// Leva o quadro atual um passo em direção ao alvo; devolve true se mudou
+bool avancaQuadro(int& quadro, int alvo) {
+    if (quadro == alvo) return false;
+    quadro += (alvo > quadro) ? 1 : -1;
+    return true;
+}
+
+// Testa a comunicação com o XPT2046 sem depender da película de toque: o canal de
+// temperatura interna (comando 0x84) sempre dá um valor no meio da escala
+void diagnosticoTouch() {
+    digitalWrite(TOUCH_CS, HIGH);
+    delay(1);
+    int doCsAlto = digitalRead(TOUCH_DO);
+    digitalWrite(TOUCH_CS, LOW);
+    delay(1);
+    int doCsBaixo = digitalRead(TOUCH_DO);
+    int temp = leXPT(0x84);
+    digitalWrite(TOUCH_CS, HIGH);
+    Serial.printf("Diag touch: T_DO com CS alto=%d, CS baixo=%d | temperatura interna=%d | T_IRQ=%d\n",
+                  doCsAlto, doCsBaixo, temp, digitalRead(TOUCH_IRQ));
+}
+
 void initDisplay() {
     pinMode(TFT_LED, OUTPUT);
     digitalWrite(TFT_LED, HIGH);
     SPI.begin(TFT_SCK, TFT_MISO, TFT_MOSI);
     display.begin();
     display.setRotation(3);  // paisagem invertida: 320x240
-    display.cp437(true);     // caractere 0xF7 = símbolo de grau
     display.fillScreen(COR_FUNDO);
-    touch.begin();
-    touch.setRotation(3);   // igual à do display, para as coordenadas do toque baterem com a tela
+    pinMode(TOUCH_CLK, OUTPUT);
+    digitalWrite(TOUCH_CLK, LOW);
+    pinMode(TOUCH_DIN, OUTPUT);
+    pinMode(TOUCH_DO, INPUT_PULLUP);  // sem o chip responder, a leitura vira 4095 em vez de 0
+    pinMode(TOUCH_CS, OUTPUT);
+    digitalWrite(TOUCH_CS, HIGH);
+    pinMode(TOUCH_IRQ, INPUT_PULLUP);
+    diagnosticoTouch();
 }
 
 void initRTC() {
@@ -470,6 +659,7 @@ void setup() {
     dht.begin();
 
     initSerial();
+    carregaConfiguracoes();
 
     initDisplay();
     initRTC();
@@ -479,7 +669,7 @@ void setup() {
     sincronizaRTC();
     initMQTT();
     MQTT.publish(TOPICO_PUBLISH_1, "s|off");
-    desenhaMenu();
+    abreTela(TELA_MENU);
 }
 
 void loop() {
@@ -496,9 +686,23 @@ void loop() {
     handleRTC();
 }
 
+void handleDisplayConfig() {
+    static unsigned long ultimoQuadro = 0;
+    if (millis() - ultimoQuadro < INTERVALO_QUADRO) return;
+    ultimoQuadro = millis();
+    bool mudou = avancaQuadro(quadroTema, temaClaro ? QUADRO_LIGADO : QUADRO_DESLIGADO);
+    mudou |= avancaQuadro(quadroAudio, buzzerMudo ? QUADRO_LIGADO : QUADRO_DESLIGADO);
+    if (mudou) desenhaIconesConfig();
+}
+
+void handleDisplay() {
+    if (telaAtual == TELA_CONFIG) handleDisplayConfig();
+    else handleDisplayMenu();
+}
+
 // O TFT não tem buffer: redesenhar a tela inteira a cada loop é lento e pisca,
 // então cada parte do menu é redesenhada só quando precisa
-void handleDisplay() {
+void handleDisplayMenu() {
     static unsigned long ultimoQuadro = 0;
     static unsigned long ultimosValores = 0;
     static unsigned long ultimaLeituraHora = 0;
@@ -537,18 +741,59 @@ void handleDisplay() {
     desenhaValores();
 }
 
-// Por enquanto o touch só informa no Serial a posição tocada, o que serve para calibrar a tela
-// antes de criar botões. No XPT2046 os valores são brutos (0 a 4095)
+// Toque dentro do retângulo, com folga em volta porque o touch resistivo não é preciso
+bool tocouEm(int x, int y, int rx, int ry, int rw, int rh) {
+    const int FOLGA = 5;
+    rx += OX;  // retângulos nas coordenadas do Lopaka
+    ry += OY;
+    return x >= rx - FOLGA && x < rx + rw + FOLGA && y >= ry - FOLGA && y < ry + rh + FOLGA;
+}
+
+void toqueMenu(int x, int y) {
+    if (tocouEm(x, y, 288, 0, 32, 32)) abreTela(TELA_CONFIG);  // engrenagem
+    // Seta do canto superior esquerdo: ainda sem função
+}
+
+void toqueConfig(int x, int y) {
+    if (tocouEm(x, y, 260, 15, 35, 25)) {
+        Serial.println("- WiFi/MQTT: tela ainda nao implementada");
+    } else if (tocouEm(x, y, 260, 47, 32, 32)) {
+        temaClaro = !temaClaro;
+        prefs.putBool("temaClaro", temaClaro);
+        aplicaTema();
+        desenhaConfig();  // redesenha com as cores novas; o ícone anima até a nova posição
+    } else if (tocouEm(x, y, 263, 84, 32, 32)) {
+        buzzerMudo = !buzzerMudo;
+        prefs.putBool("mudo", buzzerMudo);
+        if (buzzerMudo) noTone(PIN_BUZZER);
+    } else if (tocouEm(x, y, 0, 195, 140, 45)) {
+        abreTela(TELA_MENU);
+    }
+}
+
+// Age só no início de cada toque. O XPT2046 dá valores brutos (0 a 4095), convertidos para
+// pixels pela calibração TOUCH_*; o Serial mostra os dois para ajustar
 void handleTouch() {
     static bool tocando = false;
-    if (!touch.touched()) {
+    int bx, by, bz;
+    if (!leToque(bx, by, bz)) {
         tocando = false;
         return;
     }
     if (tocando) return;
     tocando = true;
-    TS_Point p = touch.getPoint();
-    Serial.printf("- Toque em x=%d y=%d (pressao %d)\n", p.x, p.y, p.z);
+    // Tudo 4095 ou tudo 0 = o XPT2046 não respondeu no SPI: o T_IRQ viu o toque, mas os dados não chegaram
+    if ((bx >= 4000 && by >= 4000) || (bx == 0 && by == 0)) {
+        Serial.printf("- Toque bruto x=%d y=%d z=%d\n", bx, by, bz);
+        Serial.println("- Toque ignorado: XPT2046 sem resposta (confira T_DO, T_DIN, T_CLK e T_CS)");
+        return;
+    }
+    // Paisagem: o eixo X bruto do XPT2046 corresponde à vertical da tela, por isso troca
+    int x = constrain(map(by, TOUCH_X_MIN, TOUCH_X_MAX, 0, display.width()), 0, display.width() - 1);
+    int y = constrain(map(bx, TOUCH_Y_MIN, TOUCH_Y_MAX, 0, display.height()), 0, display.height() - 1);
+    Serial.printf("- Toque bruto x=%d y=%d z=%d -> tela x=%d y=%d\n", bx, by, bz, x, y);
+    if (telaAtual == TELA_MENU) toqueMenu(x, y);
+    else toqueConfig(x, y);
 }
 
 void reconectWiFi() {
@@ -696,6 +941,12 @@ void handleBuzzer() {
     static int somAtual = -1;
     static uint8_t passo = 0;
     static unsigned long inicioPasso = 0;
+
+    if (buzzerMudo) {
+        if (somAtual >= 0) noTone(PIN_BUZZER);
+        somAtual = -1;
+        return;
+    }
 
     auto proximaAtiva = [](int atual) {
         for (int k = 1; k <= QTD_ANOM; k++) {
