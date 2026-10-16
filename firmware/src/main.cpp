@@ -64,6 +64,10 @@
 //Autor Rev30: Gianluca Antonicci
 //Rev31: 16-10-2026 Eixos horizontal e vertical do touch invertidos para bater com a rotação 3 do display
 //Autor Rev31: Gianluca Antonicci
+//Rev32: 16-10-2026 Tela de WiFi/MQTT (layout do Lopaka) com o status das conexões ao vivo; reconexão do Wi-Fi e do MQTT sem travar o loop
+//Autor Rev32: Gianluca Antonicci
+//Rev33: 16-10-2026 Seta da tela de configurações passa a usar image_arrow.h (a do WiFi continua com image_arrow_right_bits.h)
+//Autor Rev33: Gianluca Antonicci
 
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -84,8 +88,10 @@
 #include "temperature_weather_32_32_28f.h"
 #include "windy_weather_32_32_28f.h"
 #include "image_arrow_right_bits.h"
+#include "image_arrow.h"
 #include "mute_32_32_28f.h"
 #include "toggle_32_32_28f.h"
+#include "blushing_48_48_28f.h"
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length);
 void VerificaConexoesWiFIEMQTT();
@@ -201,7 +207,7 @@ Preferences prefs;
 bool temaClaro = false;
 bool buzzerMudo = false;
 
-enum Tela { TELA_MENU, TELA_CONFIG };
+enum Tela { TELA_MENU, TELA_CONFIG, TELA_WIFI };
 Tela telaAtual = TELA_MENU;
 
 // Calibração do touch: valores brutos do XPT2046 nos cantos da tela (veja o Serial ao tocar)
@@ -329,13 +335,13 @@ void telaMensagem(const String& titulo, const String& detalhe) {
 // Desenha um quadro 32x32 de 1 bit montando os pixels num buffer e enviando de uma vez:
 // o drawBitmap da GFX manda pixel a pixel e fica lento demais para animar 5 ícones
 // x e y nas coordenadas do Lopaka (320x240); o deslocamento para o centro é somado aqui
-void desenhaIcone(int x, int y, const uint8_t* quadro, uint16_t cor) {
-    static uint16_t buf[32 * 32];
-    for (int i = 0; i < 32 * 32; i++) {
-        uint8_t b = pgm_read_byte(&quadro[i / 8]);
+void desenhaIcone(int x, int y, const uint8_t* quadro, uint16_t cor, int tamanho = 32) {
+    static uint16_t buf[48 * 48];  // cabe o maior ícone (48x48)
+    for (int i = 0; i < tamanho * tamanho; i++) {
+        uint8_t b = pgm_read_byte(&quadro[i / 8]);  // 32 e 48 são múltiplos de 8: linhas sem sobra
         buf[i] = (b & (0x80 >> (i % 8))) ? cor : COR_FUNDO;
     }
-    display.drawRGBBitmap(x + OX, y + OY, buf, 32, 32);
+    display.drawRGBBitmap(x + OX, y + OY, buf, tamanho, tamanho);
 }
 
 void desenhaAnimacoes() {
@@ -457,14 +463,35 @@ void desenhaConfig() {
     // Fora do layout do Lopaka: a tela não tinha como voltar ao menu
     textoPeloTopo("< Voltar", 10, 205);
     display.setFont((const GFXfont*)NULL);
-    display.drawBitmap(260 + OX, 15 + OY, image_arrow_right_bits, 35, 25, COR_TEXTO);
+    display.drawBitmap(260 + OX, 15 + OY, image_arrow_bits, 35, 25, COR_TEXTO);
     desenhaIconesConfig();
+}
+
+// Linha "WiFi: ..." ou "MQTT: ...": rótulo na cor do texto e status em verde ou vermelho
+void desenhaStatusConexao(const char* rotulo, bool ok, int x, int y) {
+    display.fillRect(OX, y + OY - 4, 320, 28, COR_FUNDO);
+    display.setFont(&FreeMonoBold12pt7b);
+    display.setTextSize(1);
+    display.setTextColor(COR_TEXTO);
+    textoPeloTopo(rotulo, x, y);
+    display.setTextColor(ok ? COR_OK : COR_ERRO);
+    display.print(ok ? "Conectado" : "Desconectado");  // continua de onde o rótulo parou
+    display.setFont((const GFXfont*)NULL);
+}
+
+void desenhaWifi() {
+    display.fillScreen(COR_FUNDO);
+    // Seta: volta para as configurações
+    display.drawBitmap(15 + OX, 15 + OY, image_arrow_right_bits, 35, 25, COR_TEXTO);
+    desenhaStatusConexao("WiFi: ", WiFi.status() == WL_CONNECTED, 14, 80);
+    desenhaStatusConexao("MQTT: ", MQTT.connected(), 13, 117);
 }
 
 void abreTela(Tela tela) {
     telaAtual = tela;
     if (tela == TELA_MENU) desenhaMenu();
-    else desenhaConfig();
+    else if (tela == TELA_CONFIG) desenhaConfig();
+    else desenhaWifi();
 }
 
 // Leva o quadro atual um passo em direção ao alvo; devolve true se mudou
@@ -604,6 +631,7 @@ void initWiFi() {
 
 void initMQTT() {
     MQTT.setServer(BROKER_MQTT, BROKER_PORT);
+    MQTT.setSocketTimeout(3);  // tentativa de reconexão não trava o loop por 15 s (padrão)
     MQTT.setCallback(mqtt_callback);
 
     Serial.print("* Conectando ao Broker MQTT: ");
@@ -695,8 +723,28 @@ void handleDisplayConfig() {
     if (mudou) desenhaIconesConfig();
 }
 
+void handleDisplayWifi() {
+    static unsigned long ultimoQuadro = 0;
+    static unsigned long ultimaChecagem = 0;
+    static int wifiAnterior = -1, mqttAnterior = -1;
+    if (millis() - ultimoQuadro >= INTERVALO_QUADRO) {
+        ultimoQuadro = millis();
+        int q = millis() / INTERVALO_QUADRO % 28;
+        desenhaIcone(136, 157, (const uint8_t*)blushing_48_48_28f_frames[q], 0xCEE7, 48);
+    }
+    if (millis() - ultimaChecagem < 500) return;
+    ultimaChecagem = millis();
+    int wifiOk = WiFi.status() == WL_CONNECTED;
+    int mqttOk = MQTT.connected();
+    if (wifiOk != wifiAnterior) desenhaStatusConexao("WiFi: ", wifiOk, 14, 80);
+    if (mqttOk != mqttAnterior) desenhaStatusConexao("MQTT: ", mqttOk, 13, 117);
+    wifiAnterior = wifiOk;
+    mqttAnterior = mqttOk;
+}
+
 void handleDisplay() {
     if (telaAtual == TELA_CONFIG) handleDisplayConfig();
+    else if (telaAtual == TELA_WIFI) handleDisplayWifi();
     else handleDisplayMenu();
 }
 
@@ -756,7 +804,7 @@ void toqueMenu(int x, int y) {
 
 void toqueConfig(int x, int y) {
     if (tocouEm(x, y, 260, 15, 35, 25)) {
-        Serial.println("- WiFi/MQTT: tela ainda nao implementada");
+        abreTela(TELA_WIFI);
     } else if (tocouEm(x, y, 260, 47, 32, 32)) {
         temaClaro = !temaClaro;
         prefs.putBool("temaClaro", temaClaro);
@@ -793,20 +841,29 @@ void handleTouch() {
     int y = constrain(map(bx, TOUCH_Y_MIN, TOUCH_Y_MAX, 0, display.height()), 0, display.height() - 1);
     Serial.printf("- Toque bruto x=%d y=%d z=%d -> tela x=%d y=%d\n", bx, by, bz, x, y);
     if (telaAtual == TELA_MENU) toqueMenu(x, y);
-    else toqueConfig(x, y);
+    else if (telaAtual == TELA_CONFIG) toqueConfig(x, y);
+    else if (tocouEm(x, y, 15, 15, 35, 25)) abreTela(TELA_CONFIG);  // seta da tela de WiFi/MQTT
 }
 
+// Sem travar o loop: com o Wi-Fi caído, tenta de novo a cada 10 s e segue com o resto
+// (display, LED, buzzer), para a tela poder mostrar "Desconectado"
 void reconectWiFi() {
-    if (WiFi.status() == WL_CONNECTED)
+    static unsigned long ultimaTentativa = 0;
+    static bool estavaConectado = true;
+    if (WiFi.status() == WL_CONNECTED) {
+        if (!estavaConectado) {
+            Serial.print("Conectado com sucesso na rede ");
+            Serial.println(SSID);
+        }
+        estavaConectado = true;
         return;
-    WiFi.begin(SSID, PASSWORD);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(100);
-        Serial.print(".");
     }
-    Serial.println();
-    Serial.print("Conectado com sucesso na rede ");
-    Serial.println(SSID);
+    estavaConectado = false;
+    if (millis() - ultimaTentativa < 10000) return;
+    ultimaTentativa = millis();
+    Serial.println("Wi-Fi desconectado, tentando reconectar...");
+    WiFi.disconnect();
+    WiFi.begin(SSID, PASSWORD);
 }
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
@@ -839,9 +896,9 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 }
 
 void VerificaConexoesWiFIEMQTT() {
-    if (!MQTT.connected())
-        reconnectMQTT();
     reconectWiFi();
+    if (!MQTT.connected() && WiFi.status() == WL_CONNECTED)
+        reconnectMQTT();
 }
 
 void EnviaEstadoOutputMQTT() {
@@ -865,18 +922,18 @@ void EnviaEstadoOutputMQTT() {
 void InitOutput() {
 }
 
+// Uma tentativa a cada 5 s, sem ficar preso num while
 void reconnectMQTT() {
-    while (!MQTT.connected()) {
-        Serial.print("* Tentando se conectar ao Broker MQTT: ");
-        Serial.println(BROKER_MQTT);
-        if (MQTT.connect(ID_MQTT)) {
-            Serial.println("Conectado com sucesso ao broker MQTT!");
-            MQTT.subscribe(TOPICO_SUBSCRIBE);
-        } else {
-            Serial.println("Falha ao reconectar no broker.");
-            Serial.println("Haverá nova tentativa de conexão em 2s");
-            delay(2000);
-        }
+    static unsigned long ultimaTentativa = 0;
+    if (millis() - ultimaTentativa < 5000) return;
+    ultimaTentativa = millis();
+    Serial.print("* Tentando se conectar ao Broker MQTT: ");
+    Serial.println(BROKER_MQTT);
+    if (MQTT.connect(ID_MQTT)) {
+        Serial.println("Conectado com sucesso ao broker MQTT!");
+        MQTT.subscribe(TOPICO_SUBSCRIBE);
+    } else {
+        Serial.println("Falha ao reconectar no broker. Nova tentativa em 5s");
     }
 }
 
