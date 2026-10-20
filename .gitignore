@@ -3,4 +3,4 @@ ProjetoVinheria.code-workspace
 .vscode
 .DS_Store
 .venv
-__pycache__
+__pycache__/
