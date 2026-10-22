@@ -65,11 +65,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(obter_dados(IP, "temperature"), [])
 
     @patch("src.api.app.requisitar")
-    def test_cor_so_no_manual(self, request):
-        request.return_value = {"ledMode": {"value": "auto"}}
-        self.assertEqual(client.post("/api/comandos", params={"ip": IP}, json={"command": "red"}).status_code, 409)
-        request.return_value = {"ledMode": {"value": "manual"}}
-        self.assertEqual(client.post("/api/comandos", params={"ip": IP}, json={"command": "red"}).status_code, 200)
+    def test_cor_nao_depende_de_telemetria_de_modo_atrasada(self, request):
+        request.return_value = {}
+        response = client.post("/api/comandos", params={"ip": IP}, json={"command": "red"})
+        self.assertEqual(response.status_code, 200)
+        request.assert_called_once()
+        self.assertEqual(request.call_args.args[2], "PATCH")
         self.assertEqual(request.call_args.kwargs["body"], {"red": {"type": "command", "value": ""}})
         self.assertEqual(client.post("/api/comandos", params={"ip": IP}, json={"command": "invalid"}).status_code, 422)
 

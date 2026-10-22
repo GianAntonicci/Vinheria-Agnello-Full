@@ -5,9 +5,21 @@ import Icon from './Icon'
 export default function LedCard({ values, params, refresh, unavailable }) {
   const [busy, setBusy] = useState('')
   const [feedback, setFeedback] = useState(null)
-  const color = CORES.find((c) => c.comando === values?.state)
-  const manual = values?.ledMode === 'manual'
-  const modeKnown = ['manual', 'auto'].includes(values?.ledMode)
+  const [requestedMode, setRequestedMode] = useState(null)
+  const [requestedColor, setRequestedColor] = useState(null)
+  const confirmedMode = values?.ledMode
+  // Descarta a intenção assim que uma leitura confirma o modo solicitado.
+  if (requestedMode && confirmedMode === requestedMode) setRequestedMode(null)
+  const mode = requestedMode ?? confirmedMode
+  const manual = mode === 'manual'
+  const modeKnown = ['manual', 'auto'].includes(mode)
+  if (requestedColor && (values?.state === requestedColor || mode === 'auto')) {
+    setRequestedColor(null)
+  }
+  const selectedColor = manual ? requestedColor ?? values?.state : values?.state
+  const color = CORES.find((c) => c.comando === selectedColor)
+  const awaitingColor = manual && requestedColor && requestedColor !== values?.state
+  const awaitingConfirmation = requestedMode && requestedMode !== confirmedMode
   async function send(command) {
     setBusy(command)
     setFeedback(null)
@@ -16,6 +28,12 @@ export default function LedCard({ values, params, refresh, unavailable }) {
         method: 'POST',
         body: JSON.stringify({ command }),
       })
+      if (command === 'manual' || command === 'auto') {
+        setRequestedMode(command)
+        if (command === 'auto') setRequestedColor(null)
+      } else {
+        setRequestedColor(command)
+      }
       setFeedback({ ok: true, text: result.mensagem })
       refresh()
     } catch (error) {
@@ -47,11 +65,17 @@ export default function LedCard({ values, params, refresh, unavailable }) {
           }}
         />
         <div>
-          <small>Cor atual</small>
+          <small>{awaitingColor ? 'Cor solicitada' : 'Cor atual'}</small>
           <strong>{color?.nome ?? 'Sem dados'}</strong>
         </div>
         <span className="led-mode">
-          {modeKnown ? (manual ? 'Manual' : 'Automático') : 'Aguardando'}
+          {awaitingConfirmation
+            ? `${manual ? 'Manual' : 'Automático'} solicitado`
+            : modeKnown
+              ? manual
+                ? 'Manual'
+                : 'Automático'
+              : 'Aguardando'}
         </span>
       </div>
       <div className="mode-switch" role="group" aria-label="Modo do LED">
@@ -61,9 +85,9 @@ export default function LedCard({ values, params, refresh, unavailable }) {
         ].map(([key, label]) => (
           <button
             key={key}
-            aria-pressed={values?.ledMode === key}
+            aria-pressed={mode === key}
             disabled={!!busy || unavailable}
-            className={values?.ledMode === key ? 'selected' : ''}
+            className={mode === key ? 'selected' : ''}
             onClick={() => send(key)}
           >
             {label}
@@ -71,21 +95,23 @@ export default function LedCard({ values, params, refresh, unavailable }) {
         ))}
       </div>
       <p className="muted led-help">
-        {!modeKnown
-          ? 'Aguardando o modo informado pelo dispositivo.'
-          : manual
-            ? 'Escolha uma cor para enviar ao dispositivo.'
-            : 'A cor é controlada automaticamente pelos sensores.'}
+        {awaitingConfirmation
+          ? `Comando de modo ${manual ? 'manual' : 'automático'} enviado. Aguardando confirmação do dispositivo.${manual ? ' Você já pode enviar uma cor.' : ''}`
+          : !modeKnown
+            ? 'O dispositivo ainda não informou o modo. Selecione Manual para enviar uma cor.'
+            : manual
+              ? 'Escolha uma cor para enviar ao dispositivo.'
+              : 'A cor é controlada automaticamente pelos sensores.'}
       </p>
       <div className="color-grid">
         {CORES.map((c) => (
           <button
             key={c.comando}
             disabled={!manual || !!busy || unavailable}
-            className={values?.state === c.comando ? 'chosen' : ''}
+            className={selectedColor === c.comando ? 'chosen' : ''}
             onClick={() => send(c.comando)}
             aria-label={`LED ${c.nome.toLowerCase()}`}
-            aria-pressed={values?.state === c.comando}
+            aria-pressed={selectedColor === c.comando}
           >
             <span className="color-dot" style={{ background: c.hex }} />
             {c.nome}

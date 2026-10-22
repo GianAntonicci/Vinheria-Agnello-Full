@@ -110,10 +110,8 @@ def historico(ip: str, entity: str = DEFAULT_ENTITY, entity_type: str = "Lamp",
 
 @app.post("/api/comandos")
 def comandos(payload: CommandRequest, ip: str, entity: str = DEFAULT_ENTITY, entity_type: str = "Lamp"):
-    if payload.command not in ("auto", "manual"):
-        current = atual(ip, entity, entity_type)
-        if current["values"]["ledMode"] != "manual":
-            raise HTTPException(409, "Ative o modo manual e aguarde a confirmação do dispositivo.")
+    # O Orion pode ter um ledMode anterior ao comando recém-enviado.
+    # O firmware decide se aceita cores; mantém o mesmo envio do Postman.
     requisitar(ip, 1026, "PATCH", entity_path(entity) + "/attrs", params={"type": entity_type},
                body={payload.command: {"type": "command", "value": ""}})
     return {"mensagem": "Comando enviado. Aguardando atualização do dispositivo."}

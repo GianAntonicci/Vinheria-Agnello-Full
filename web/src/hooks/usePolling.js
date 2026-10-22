@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { mensagemErro } from '../lib/api'
+import { criarPolling } from '../lib/polling'
 
 export default function usePolling(fetcher, interval) {
   const [result, setResult] = useState({
@@ -10,16 +11,10 @@ export default function usePolling(fetcher, interval) {
   })
   const reload = useRef(() => {})
   useEffect(() => {
-    let active = true,
-      timer,
-      busy = false
-    const controller = new AbortController()
-    async function run() {
-      if (busy || !active) return
-      busy = true
-      clearTimeout(timer)
+    let active = true
+    const polling = criarPolling(async (signal) => {
       try {
-        const data = await fetcher(controller.signal)
+        const data = await fetcher(signal)
         if (active)
           setResult((old) => ({
             data,
@@ -37,17 +32,13 @@ export default function usePolling(fetcher, interval) {
             loading: false,
             fetcher,
           }))
-      } finally {
-        busy = false
-        if (active) timer = setTimeout(run, interval)
       }
-    }
-    reload.current = run
-    run()
+    }, interval)
+    reload.current = polling.atualizar
+    polling.atualizar()
     return () => {
       active = false
-      controller.abort()
-      clearTimeout(timer)
+      polling.encerrar()
     }
   }, [fetcher, interval])
   const refresh = useCallback(() => reload.current(), [])

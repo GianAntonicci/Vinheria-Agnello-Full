@@ -53,7 +53,7 @@ Documentação interativa: `/api/docs`. Não há WebSocket. São duas chamadas i
 
 Os estados são derivados de `alert` (exemplo: `temp:critico;luz:alerta`), e o geral considera o pior nível. Dados ausentes e falha de conexão resultam em “Sem dados”. A última leitura permanece visível, identificada como anterior. A tendência mostra a diferença entre consultas e a mudança de faixa determina piora. Limites inclusivos e faixas estão centralizados em `src/config/sensores.js`, conforme o firmware.
 
-As cores do LED só ficam habilitadas após `ledMode` confirmar `manual`; a API também verifica isso. Sucesso no envio confirma a aceitação pelo Orion. Cor e modo são confirmados por leituras seguintes do ESP32.
+As cores do LED ficam habilitadas quando `ledMode` informa `manual` ou após o Orion aceitar o comando `manual` enviado pelo painel. Enquanto a telemetria não confirma a mudança, o painel exibe “Manual solicitado”. A API encaminha os comandos como no Postman, sem bloquear cores com base numa leitura anterior de `ledMode`; o firmware só aceita cores no modo manual. Sucesso no envio confirma a aceitação pelo Orion. Cor e modo físicos continuam sendo confirmados pelas leituras do ESP32.
 
 O formulário usa `lamp001`, MQTT e UltraLight como modelo. O grupo de serviço TEF precisa existir. Registro de comandos e assinaturas numéricas seguem a coleção Postman existente. Se uma etapa adicional falhar, a API devolve avisos de sucesso parcial; não cadastre novamente um dispositivo já criado.
 
@@ -66,7 +66,7 @@ npm run lint
 npm run build
 python -m pip install -r requirements-dev.txt
 python -m unittest discover -s src/api/tests -v
-node --test src/config/sensores.test.js
+node --test src/config/sensores.test.js src/lib/polling.test.js
 ```
 
 Os testes simulam o FIWARE e cobrem destino, headers, timeout, respostas agrupadas, histórico parcial, comandos, cadastro, edição e exclusão parcial. A validação com EC2, ESP32 e roteamento real do Vercel exige infraestrutura ativa.
