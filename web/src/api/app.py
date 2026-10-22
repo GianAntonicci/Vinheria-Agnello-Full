@@ -81,12 +81,26 @@ def conexao(ip: str):
     return {"conectado": True, "ip": validar_ip(ip)}
 
 
+def timestamp_atributo(attribute):
+    metadata = attribute.get("metadata") or {}
+    # Não usa o dateModified da entidade: outro sensor pode tê-la atualizado.
+    for item in (metadata.get("TimeInstant"), metadata.get("dateModified"), attribute.get("dateModified")):
+        value = item.get("value") if isinstance(item, dict) else item
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
 @app.get("/api/atual")
 def atual(ip: str, entity: str = DEFAULT_ENTITY, entity_type: str = "Lamp"):
     data = requisitar(ip, 1026, "GET", entity_path(entity), params={
-        "attrs": ",".join((*SENSORS, "state", "ledMode", "alert")), "type": entity_type})
+        "attrs": ",".join((*SENSORS, "state", "ledMode", "alert")),
+        "type": entity_type, "options": "dateModified"})
     values = {key: data.get(key, {}).get("value") for key in (*SENSORS, "state", "ledMode", "alert")}
-    return {"values": values, "consultado_em": datetime.now(timezone.utc).isoformat()}
+    timestamps = {key: timestamp_atributo(data.get(key) or {})
+                  for key in (*SENSORS, "state", "ledMode", "alert")}
+    return {"values": values, "timestamps": timestamps,
+            "consultado_em": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/api/historico")

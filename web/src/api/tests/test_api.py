@@ -44,6 +44,34 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertEqual(request.call_count, 1)
 
+    @patch("src.api.app.requisitar")
+    def test_preserva_horario_individual_sem_usar_modificacao_da_entidade(self, request):
+        request.return_value = {
+            "temperature": {"value": "27.4", "metadata": {"TimeInstant": {"value": "2026-10-22T20:45:34.509Z"}}},
+            "humidity": {"value": 59.9, "metadata": {"dateModified": {"value": "2026-10-22T20:45:34.939Z"}}},
+            "luminosity": {"value": 52},
+            "alert": {"value": "temp:critico", "metadata": {"TimeInstant": {"value": "2026-10-22T20:40:52.530Z"}}},
+            "dateModified": {"value": "2026-10-22T20:45:34.950Z"},
+        }
+        response = client.get("/api/atual", params={"ip": IP})
+        data = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["values"]["temperature"], "27.4")
+        self.assertEqual(data["timestamps"]["temperature"], "2026-10-22T20:45:34.509Z")
+        self.assertEqual(data["timestamps"]["alert"], "2026-10-22T20:40:52.530Z")
+        self.assertEqual(data["timestamps"]["humidity"], "2026-10-22T20:45:34.939Z")
+        self.assertIsNone(data["timestamps"]["luminosity"])
+        self.assertIsNone(data["timestamps"]["ledMode"])
+        self.assertEqual(request.call_args.kwargs["params"]["options"], "dateModified")
+
+    @patch("src.api.app.requisitar")
+    def test_alerta_e_repassado_sem_alterar_formato_atual_ou_legado(self, request):
+        for alert in ("ok", "temp:critico,luz:alerta", "temp:critico;luz:alerta", "", None):
+            request.return_value = {"alert": {"value": alert}}
+            response = client.get("/api/atual", params={"ip": IP})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["values"]["alert"], alert)
+
     @patch("src.api.app.obter_dados")
     def test_historico_parcial_e_limite(self, history):
         def fetch(ip, sensor, *args):
