@@ -1,14 +1,20 @@
 import Icon from './Icon'
-import { formatarValor, nivelPorValor } from '../config/sensores'
+import StatusBadge from './StatusBadge'
+import ReadingTime from './ReadingTime'
+import { formatarValor, nivelPorValor, numeroSensor } from '../config/sensores'
 export default function IndicatorCard({
   sensor,
   value,
   previous,
   dark,
   loading,
+  status,
+  timestamp,
+  referenceTime,
 }) {
-  const valid = typeof value === 'number' && Number.isFinite(value)
-  const delta = valid && typeof previous === 'number' ? value - previous : null
+  value = numeroSensor(value)
+  previous = numeroSensor(previous)
+  const delta = value !== null && previous !== null ? value - previous : null
   const good =
     delta !== null &&
     nivelPorValor(sensor, value) <= nivelPorValor(sensor, previous)
@@ -21,6 +27,9 @@ export default function IndicatorCard({
       <div className="indicator-number">
         {loading ? <span className="skeleton" /> : formatarValor(value)}
         <span>{sensor.unidade}</span>
+      </div>
+      <div className="indicator-status">
+        <StatusBadge status={status} />
       </div>
       <div className="indicator-footer">
         {delta !== null ? (
@@ -40,6 +49,7 @@ export default function IndicatorCard({
           </span>
         )}
       </div>
+      <ReadingTime timestamp={timestamp} referenceTime={referenceTime} />
     </article>
   )
 }

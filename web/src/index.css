@@ -1701,3 +1701,47 @@ tr:last-child td {
     transition: none !important;
   }
 }
+
+.indicator-status {
+  margin-bottom: 10px;
+}
+.reading-time {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.7;
+  margin-top: 9px;
+}
+.reading-time svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.reading-time.stale {
+  color: var(--amber);
+}
+.dark-card .reading-time {
+  color: #b1b9af;
+}
+.dark-card .reading-time.stale {
+  color: #e3c27f;
+}
+.dark-card .badge.normal {
+  color: #9ed5b8;
+}
+.dark-card .badge.alerta {
+  color: #e3c27f;
+}
+.dark-card .badge.critico {
+  color: #f1a5a5;
+}
+.classification-notice {
+  font-size: 11px;
+}
+.classification-note {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.8;
+  margin-bottom: 18px;
+}

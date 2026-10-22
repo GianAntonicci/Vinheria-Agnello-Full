@@ -4,7 +4,8 @@ import usePolling from '../hooks/usePolling'
 import {
   SENSORES,
   PESO,
-  estadosDoAlerta,
+  avaliarSensores,
+  formatarValor,
   estadoGeral,
   ESTADOS,
 } from '../config/sensores'
@@ -14,6 +15,7 @@ import StatusBadge from '../components/StatusBadge'
 import GraficoSensor from '../components/GraficoSensor'
 import LedCard from '../components/LedCard'
 import Icon from '../components/Icon'
+import ReadingTime from '../components/ReadingTime'
 export default function Dashboard({ ip, device }) {
   const [points, setPoints] = useState(30)
   const entity = device.entity_name,
@@ -30,13 +32,16 @@ export default function Dashboard({ ip, device }) {
   const current = usePolling(currentFetcher, 5000)
   const history = usePolling(historyFetcher, 10000)
   const values = current.data?.values || {}
-  const statuses = estadosDoAlerta(current.error ? null : values.alert, values)
+  const assessment = avaliarSensores(values.alert, values)
+  const statuses = current.error
+    ? Object.fromEntries(SENSORES.map((s) => [s.key, 'desconhecido']))
+    : assessment.estados
   const general = estadoGeral(statuses)
-  const previousStatuses = estadosDoAlerta(
+  const previousAssessment = avaliarSensores(
     current.previous?.values?.alert,
     current.previous?.values,
   )
-  const previousGeneral = estadoGeral(previousStatuses)
+  const previousGeneral = estadoGeral(previousAssessment.estados)
   const stateDelta =
     current.previous &&
     general !== 'desconhecido' &&
@@ -74,8 +79,11 @@ export default function Dashboard({ ip, device }) {
           <IndicatorCard
             key={sensor.key}
             sensor={sensor}
-            value={values[sensor.key]}
+            value={assessment.sensores[sensor.key].valor}
             previous={current.previous?.values[sensor.key]}
+            status={statuses[sensor.key]}
+            timestamp={current.data?.timestamps?.[sensor.key]}
+            referenceTime={current.data?.consultado_em}
             dark={i === 0}
             loading={current.loading}
           />
@@ -102,11 +110,41 @@ export default function Dashboard({ ip, device }) {
                 desde a última leitura
               </span>
             ) : (
-              <span>Conforme o alerta do dispositivo</span>
+              <span>Conforme as leituras e o alerta</span>
             )}
           </div>
         </article>
       </section>
+      {!current.error && current.data && assessment.divergencias.length > 0 && (
+        <div className="notice warning classification-notice" role="status">
+          <Icon name="alert" size={16} />
+          <div>
+            <p>
+              Divergência com o alerta do dispositivo. Exibindo o pior estado:{' '}
+              {assessment.divergencias
+                .map(
+                  (sensor) =>
+                    `${sensor.nome} (${ESTADOS[assessment.sensores[sensor.key].calculado]} pela leitura; ${ESTADOS[assessment.sensores[sensor.key].informado]} pelo dispositivo)`,
+                )
+                .join('; ')}
+              .
+            </p>
+            <ReadingTime
+              timestamp={current.data?.timestamps?.alert}
+              referenceTime={current.data?.consultado_em}
+              label="Última atualização do alerta no Orion"
+            />
+          </div>
+        </div>
+      )}
+      {!current.error && current.data && !assessment.alertaDisponivel && (
+        <p className="classification-note" role="status">
+          {assessment.alertaInvalido
+            ? 'Alerta do dispositivo com formato inválido.'
+            : 'Alerta do dispositivo indisponível.'}{' '}
+          Os estados são calculados pelas leituras válidas.
+        </p>
+      )}
       <section className="environment-grid">
         <article className="card levels-card">
           <div className="section-heading">
@@ -130,7 +168,7 @@ export default function Dashboard({ ip, device }) {
             <LevelBar
               key={sensor.key}
               sensor={sensor}
-              value={values[sensor.key]}
+              value={assessment.sensores[sensor.key].valor}
               status={statuses[sensor.key]}
             />
           ))}
@@ -210,9 +248,7 @@ export default function Dashboard({ ip, device }) {
                     </span>
                   </td>
                   <td>
-                    {typeof values[s.key] === 'number'
-                      ? values[s.key].toLocaleString('pt-BR')
-                      : '—'}{' '}
+                    {formatarValor(assessment.sensores[s.key].valor)}{' '}
                     {s.unidade}
                   </td>
                   <td>{s.normal}</td>

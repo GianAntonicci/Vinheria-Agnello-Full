@@ -1,8 +1,9 @@
 import StatusBadge from './StatusBadge'
 import Icon from './Icon'
-import { formatarValor } from '../config/sensores'
+import { formatarValor, numeroSensor } from '../config/sensores'
 export default function LevelBar({ sensor, value, status }) {
-  const valid = typeof value === 'number' && Number.isFinite(value)
+  value = numeroSensor(value)
+  const valid = value !== null
   const points = [0, ...sensor.limites, sensor.max]
   const classes =
     sensor.limites.length === 2
