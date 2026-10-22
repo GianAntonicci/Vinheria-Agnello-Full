@@ -28,20 +28,12 @@
 //Autor Rev12: Gianluca Antonicci
 //Rev13: 08-10-2026 Suporte ao touch capacitivo FT6206 (I2C, SDA 8 / SCL 9) do ILI9341 do Wokwi, escolhido pelo #define WOKWI
 //Autor Rev13: Gianluca Antonicci
-//Rev14: 11-10-2026 Relógio RTC (DS3231 na placa, DS1307 no Wokwi) no I2C SDA 8 / SCL 9, acertado pelo NTP quando há Wi-Fi; hora só no Serial
-//Autor Rev14: Gianluca Antonicci
-//Rev15: 11-10-2026 Removido o suporte ao Wokwi; código só para a placa física (touch XPT2046 e RTC DS3231)
+//Rev15: 11-10-2026 Removido o suporte ao Wokwi; código só para a placa física (touch XPT2046)
 //Autor Rev15: Gianluca Antonicci
-//Rev16: 15-10-2026 Menu principal (layout do Lopaka adaptado para a Adafruit ILI9341): hora do RTC, temperatura, luminosidade e umidade em tempo real, com ícones animados
+//Rev16: 15-10-2026 Menu principal (layout do Lopaka adaptado para a Adafruit ILI9341): temperatura, luminosidade e umidade em tempo real, com ícones animados
 //Autor Rev16: Gianluca Antonicci
-//Rev17: 15-10-2026 Hora do menu cai para o relógio interno acertado pelo NTP quando o DS3231 não responde; RTC procurado de novo a cada 5 s com varredura do I2C no Serial
-//Autor Rev17: Gianluca Antonicci
-//Rev18: 15-10-2026 Varredura do I2C só na partida e com timeout curto (travava a tela sem o RTC); nova busca do RTC a cada 30 s
-//Autor Rev18: Gianluca Antonicci
 //Rev19: 15-10-2026 Partida mais rápida: removidas as esperas fixas antes de conectar e antes do menu; telas de conectado ficam 1 s
 //Autor Rev19: Gianluca Antonicci
-//Rev20: 15-10-2026 Removidas a varredura do I2C e a nova busca do RTC no loop: com o barramento travado cada tentativa levava ~1 s e a partida demorava 2 min
-//Autor Rev20: Gianluca Antonicci
 //Rev21: 15-10-2026 Tela de configurações (layout do Lopaka) aberta pela engrenagem: tema claro/escuro e buzzer mudo, salvos na memória flash; toque mapeado para pixels da tela
 //Autor Rev21: Gianluca Antonicci
 //Rev22: 15-10-2026 Leituras inválidas do touch (4095, chip sem responder) são ignoradas
@@ -74,11 +66,8 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
-#include <Wire.h>
-#include <RTClib.h>
 #include <DHT.h>
 #include <Preferences.h>
-#include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeMonoBold12pt7b.h>
 
 #include "down_arrow_32_32_28f.h"
@@ -104,8 +93,6 @@ void handleDisplay();
 void handleDisplayMenu();
 void desenhaMenu();
 void handleTouch();
-void handleRTC();
-bool horaAtual(int& hora, int& minuto);
 
 #define TFT_SCK   13
 #define TFT_MOSI  14
@@ -119,8 +106,6 @@ bool horaAtual(int& hora, int& minuto);
 #define TOUCH_DIN 41
 #define TOUCH_CS  21
 #define TOUCH_IRQ 17
-#define RTC_SDA 8
-#define RTC_SCL 9
 #define DHTPIN 15
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
@@ -174,17 +159,8 @@ bool leToque(int& x, int& y, int& z) {
     return z >= PRESSAO_MINIMA;
 }
 
-RTC_DS3231 rtc;
-bool rtcOk = false;
-const long FUSO_BRASILIA = -3 * 3600;
-const unsigned long INTERVALO_NTP = 6UL * 3600 * 1000;
-const unsigned long INTERVALO_HORA_SERIAL = 30000;
-unsigned long ultimoNTP = 0;
-unsigned long ultimaHoraSerial = 0;
-
 uint16_t COR_FUNDO = 0x0000;
 uint16_t COR_TEXTO = 0xFFFF;
-uint16_t COR_HORA  = 0xFF47;
 uint16_t COR_BORDA = 0xEF7D;
 const uint16_t COR_OK    = 0x07E0;
 const uint16_t COR_ERRO  = 0xF800;
@@ -330,22 +306,6 @@ void desenhaAnimacoes() {
     desenhaIcone(288, 0, (const uint8_t*)gear_32_32_28f_frames[q], COR_BORDA);
 }
 
-void desenhaHora() {
-    char hora[6] = "--:--";
-    int hh, mm;
-    if (horaAtual(hh, mm)) snprintf(hora, sizeof(hora), "%02d:%02d", hh, mm);
-    display.setFont(&FreeSans12pt7b);
-    display.setTextSize(2);
-    display.setTextColor(COR_HORA);
-    int16_t x1, y1;
-    uint16_t w, h;
-    display.getTextBounds(hora, 0, 0, &x1, &y1, &w, &h);
-    display.fillRect(34 + OX, 10 + OY, 252, 56, COR_FUNDO);
-    display.setCursor((display.width() - w) / 2 - x1, 18 + OY - y1);
-    display.print(hora);
-    display.setFont((const GFXfont*)NULL);
-}
-
 uint16_t corDoNivel(Nivel n) {
     if (n == NIVEL_CRITICO) return COR_ERRO;
     if (n == NIVEL_ALERTA) return COR_ALERTA;
@@ -382,7 +342,6 @@ void desenhaMenu() {
     display.drawRoundRect(BARRA_X, BARRA_Y_TEMP, BARRA_W, BARRA_H, 8, COR_BORDA);
     display.drawRoundRect(BARRA_X, BARRA_Y_LUZ, BARRA_W, BARRA_H, 8, COR_BORDA);
     display.drawRoundRect(BARRA_X, BARRA_Y_UMID, BARRA_W, BARRA_H, 8, COR_BORDA);
-    desenhaHora();
     desenhaValores();
     desenhaAnimacoes();
 }
@@ -391,12 +350,10 @@ void aplicaTema() {
     if (temaClaro) {
         COR_FUNDO = 0xFFFF;
         COR_TEXTO = 0x0000;
-        COR_HORA  = 0xC280;
         COR_BORDA = 0x7BEF;
     } else {
         COR_FUNDO = 0x0000;
         COR_TEXTO = 0xFFFF;
-        COR_HORA  = 0xFF47;
         COR_BORDA = 0xEF7D;
     }
 }
@@ -498,62 +455,6 @@ void initDisplay() {
     diagnosticoTouch();
 }
 
-void initRTC() {
-    Wire.begin(RTC_SDA, RTC_SCL);
-    Wire.setTimeOut(10);
-    rtcOk = rtc.begin(&Wire);
-    if (!rtcOk) {
-        Serial.println("RTC nao encontrado! Confira SDA 8, SCL 9, VCC e GND do DS3231");
-        return;
-    }
-    Serial.println("RTC DS3231 encontrado");
-    if (rtc.lostPower()) rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-}
-
-bool horaAtual(int& hora, int& minuto) {
-    if (rtcOk) {
-        DateTime agora = rtc.now();
-        hora = agora.hour();
-        minuto = agora.minute();
-        return true;
-    }
-    struct tm agora;
-    if (!getLocalTime(&agora, 0)) return false;
-    hora = agora.tm_hour;
-    minuto = agora.tm_min;
-    return true;
-}
-
-void sincronizaRTC() {
-    if (WiFi.status() != WL_CONNECTED) return;
-    configTime(FUSO_BRASILIA, 0, "pool.ntp.org", "a.st1.ntp.br");
-    struct tm agora;
-    if (!getLocalTime(&agora, 5000)) {
-        Serial.println("Falha no NTP, mantendo a hora do RTC");
-        return;
-    }
-    ultimoNTP = millis();
-    if (!rtcOk) {
-        Serial.println("Relogio interno acertado pelo NTP (sem RTC)");
-        return;
-    }
-    rtc.adjust(DateTime(agora.tm_year + 1900, agora.tm_mon + 1, agora.tm_mday,
-                        agora.tm_hour, agora.tm_min, agora.tm_sec));
-    Serial.println("RTC acertado pelo NTP");
-}
-
-void handleRTC() {
-    if (millis() - ultimoNTP >= INTERVALO_NTP) {
-        ultimoNTP = millis();
-        sincronizaRTC();
-    }
-    if (!rtcOk || millis() - ultimaHoraSerial < INTERVALO_HORA_SERIAL) return;
-    ultimaHoraSerial = millis();
-    DateTime agora = rtc.now();
-    Serial.printf("Hora: %02d/%02d/%04d %02d:%02d:%02d\n", agora.day(), agora.month(), agora.year(),
-                  agora.hour(), agora.minute(), agora.second());
-}
-
 void initSerial() {
     Serial.begin(115200);
 }
@@ -649,11 +550,8 @@ void setup() {
     carregaConfiguracoes();
 
     initDisplay();
-    initRTC();
 
     initWiFi();
-    telaMensagem("Acertando a hora...", "Servidor: pool.ntp.org");
-    sincronizaRTC();
     initMQTT();
     MQTT.publish(TOPICO_PUBLISH_1, "s|off");
     abreTela(TELA_MENU);
@@ -670,7 +568,6 @@ void loop() {
     MQTT.loop();
     handleDisplay();
     handleTouch();
-    handleRTC();
 }
 
 void handleDisplayConfig() {
@@ -710,8 +607,6 @@ void handleDisplay() {
 void handleDisplayMenu() {
     static unsigned long ultimoQuadro = 0;
     static unsigned long ultimosValores = 0;
-    static unsigned long ultimaLeituraHora = 0;
-    static int minutoAnterior = -1;
     static float tempAnterior = NAN, umidAnterior = NAN;
     static int luzAnterior = -1;
     static Nivel niveisAnteriores[QTD_ANOM] = { NIVEL_OK, NIVEL_OK, NIVEL_OK };
@@ -719,16 +614,6 @@ void handleDisplayMenu() {
     if (millis() - ultimoQuadro >= INTERVALO_QUADRO) {
         ultimoQuadro = millis();
         desenhaAnimacoes();
-    }
-
-    if (millis() - ultimaLeituraHora >= 1000) {
-        ultimaLeituraHora = millis();
-        int hora, minuto = -1;
-        horaAtual(hora, minuto);
-        if (minuto != minutoAnterior) {
-            minutoAnterior = minuto;
-            desenhaHora();
-        }
     }
 
     if (millis() - ultimosValores < INTERVALO_VALORES) return;
