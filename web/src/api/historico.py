@@ -1,122 +1,45 @@
-import requests
-import matplotlib.pyplot as plt
-from datetime import datetime
+"""Histórico STH-Comet, sem dependências de renderização no servidor."""
+from math import isfinite
+from fastapi import HTTPException
 
-def obter_dados_luminosidade(lastN):
-    url = f"http://54.236.175.117:8666/STH/v1/contextEntities/type/Lamp/id/urn:ngsi-ld:Lamp:001/attributes/luminosity?lastN={lastN}"
+from .fiware import requisitar, segmento
 
-    headers = {
-        'fiware-service': 'smart',
-        'fiware-servicepath': '/'
-    }
 
-    response = requests.get(url, headers=headers, timeout=10)
-
-    if response.status_code == 200:
-        data = response.json()
-        luminosity_data = data['contextResponses'][0]['contextElement']['attributes'][0]['values']
-        return luminosity_data
-    else:
-        print(f"Erro ao obter dados: {response.status_code}")
+def obter_dados(ip, atributo, lastN=30, entidade="urn:ngsi-ld:Lamp:001", tipo="Lamp"):
+    path = (f"/STH/v1/contextEntities/type/{segmento(tipo)}/id/{segmento(entidade)}"
+            f"/attributes/{segmento(atributo)}")
+    data = requisitar(ip, 8666, "GET", path, params={"lastN": lastN}, vazio_404=True)
+    if data is None:
         return []
+    try:
+        responses = data.get("contextResponses", [])
+        if not responses:
+            return []
+        element = responses[0]
+        status = int(element.get("statusCode", {}).get("code", 200))
+        if status == 404:
+            return []
+        if status >= 400:
+            raise ValueError
+        attrs = element["contextElement"]["attributes"]
+        values = attrs[0].get("values", []) if attrs else []
+        result = []
+        for value in values:
+            number = float(value["attrValue"])
+            if isfinite(number):
+                result.append({"horario": value["recvTime"], "valor": number})
+        return sorted(result, key=lambda row: row["horario"])
+    except (KeyError, TypeError, ValueError, IndexError):
+        raise HTTPException(502, "Histórico inválido retornado pelo STH-Comet.") from None
 
-def obter_dados_temperatura(lastN):
-    url = f"http://54.236.175.117:8666/STH/v1/contextEntities/type/Lamp/id/urn:ngsi-ld:Lamp:001/attributes/temperature?lastN={lastN}"
 
-    headers = {
-        'fiware-service': 'smart',
-        'fiware-servicepath': '/'
-    }
+def obter_dados_luminosidade(ip, lastN=30, **kwargs):
+    return obter_dados(ip, "luminosity", lastN, **kwargs)
 
-    response = requests.get(url, headers=headers, timeout=10)
 
-    if response.status_code == 200:
-        data = response.json()
-        temperature_data = data['contextResponses'][0]['contextElement']['attributes'][0]['values']
-        return temperature_data
-    else:
-        print(f"Erro ao obter dados: {response.status_code}")
-        return []
+def obter_dados_temperatura(ip, lastN=30, **kwargs):
+    return obter_dados(ip, "temperature", lastN, **kwargs)
 
-def obter_dados_umidade(lastN):
-    url = f"http://54.236.175.117:8666/STH/v1/contextEntities/type/Lamp/id/urn:ngsi-ld:Lamp:001/attributes/humidity?lastN={lastN}"
 
-    headers = {
-        'fiware-service': 'smart',
-        'fiware-servicepath': '/'
-    }
-
-    response = requests.get(url, headers=headers, timeout=10)
-
-    if response.status_code == 200:
-        data = response.json()
-        humidity_data = data['contextResponses'][0]['contextElement']['attributes'][0]['values']
-        return humidity_data
-    else:
-        print(f"Erro ao obter dados: {response.status_code}")
-        return []
-
-def plotar_luminosidade(lastN):
-    dados = obter_dados_luminosidade(lastN)
-
-    if not dados:
-        print("Nenhum dado de luminosidade para plotar")
-        return
-
-    tempos = [datetime.fromisoformat(d['recvTime']) for d in dados]
-    valores = [d['attrValue'] for d in dados]
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(tempos, valores, marker='o', linestyle='-', color='orange')
-    plt.title('Luminosidade')
-    plt.xlabel('Horário (UTC)')
-    plt.ylabel('Luminosidade (%)')
-    plt.grid(True)
-    plt.gcf().autofmt_xdate()
-    plt.tight_layout()
-    plt.show()
-
-def plotar_temperatura(lastN):
-    dados = obter_dados_temperatura(lastN)
-
-    if not dados:
-        print("Nenhum dado de temperatura para plotar")
-        return
-
-    tempos = [datetime.fromisoformat(d['recvTime']) for d in dados]
-    valores = [d['attrValue'] for d in dados]
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(tempos, valores, marker='o', linestyle='-', color='red')
-    plt.title('Temperatura')
-    plt.xlabel('Horário (UTC)')
-    plt.ylabel('Temperatura (°C)')
-    plt.grid(True)
-    plt.gcf().autofmt_xdate()
-    plt.tight_layout()
-    plt.show()
-
-def plotar_umidade(lastN):
-    dados = obter_dados_umidade(lastN)
-
-    if not dados:
-        print("Nenhum dado de umidade para plotar")
-        return
-
-    tempos = [datetime.fromisoformat(d['recvTime']) for d in dados]
-    valores = [d['attrValue'] for d in dados]
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(tempos, valores, marker='o', linestyle='-', color='blue')
-    plt.title('Umidade')
-    plt.xlabel('Horário (UTC)')
-    plt.ylabel('Umidade (%)')
-    plt.grid(True)
-    plt.gcf().autofmt_xdate()
-    plt.tight_layout()
-    plt.show()
-
-if __name__ == "__main__":
-    plotar_luminosidade(30)
-    plotar_temperatura(30)
-    plotar_umidade(30)
+def obter_dados_umidade(ip, lastN=30, **kwargs):
+    return obter_dados(ip, "humidity", lastN, **kwargs)
