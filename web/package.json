@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "dev:web": "vite",
-    "dev:api": "cd src/api && ../../../.venv/bin/uvicorn app:app --reload --port 8000"
+    "dev:api": "python3 -m uvicorn src.api.app:app --reload --port 8000"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
