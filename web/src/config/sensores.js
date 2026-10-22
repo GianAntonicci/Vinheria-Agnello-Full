@@ -75,45 +75,116 @@ export const ESTADOS = {
   critico: 'Crítico',
   desconhecido: 'Sem dados',
 }
-export const PESO = { normal: 0, alerta: 1, critico: 2, desconhecido: 3 }
-export function estadosDoAlerta(alert, values = {}) {
-  const result = Object.fromEntries(
+export const PESO = { normal: 0, alerta: 1, critico: 2 }
+const NIVEIS = ['normal', 'alerta', 'critico']
+export const LEITURA_DESATUALIZADA_MS = 30000
+
+export function numeroSensor(value) {
+  if (typeof value === 'string') {
+    value = value.trim()
+    if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value))
+      return null
+    value = Number(value)
+  }
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+export function interpretarAlerta(alert) {
+  const estados = Object.fromEntries(
     SENSORES.map((s) => [s.key, 'desconhecido']),
   )
-  if (typeof alert !== 'string' || !alert.trim()) return result
-  const parts = alert.split(';')
-  if (
-    alert !== 'ok' &&
-    parts.some((p) => !/^(temp|umid|luz):(alerta|critico)$/.test(p))
-  )
-    return result
-  for (const sensor of SENSORES) {
-    if (
-      typeof values[sensor.key] === 'number' &&
-      Number.isFinite(values[sensor.key])
-    )
-      result[sensor.key] = 'normal'
-    for (const part of parts) {
-      const [key, level] = part.split(':')
-      if (
-        key === sensor.alertKey &&
-        (result[sensor.key] === 'desconhecido' ||
-          PESO[level] > PESO[result[sensor.key]])
-      )
-        result[sensor.key] = level
+  if (typeof alert !== 'string' || !alert.trim()) {
+    return { estados, disponivel: false, invalido: false }
+  }
+  const normalized = alert
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+  const parts = normalized
+    .split(/[,;]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (!parts.length) return { estados, disponivel: false, invalido: false }
+  if (parts.length === 1 && parts[0] === 'ok') {
+    return {
+      estados: Object.fromEntries(SENSORES.map((s) => [s.key, 'normal'])),
+      disponivel: true,
+      invalido: false,
     }
   }
-  return result
+  let invalido = false
+  for (const part of parts) {
+    const match = /^(temp|umid|luz)\s*:\s*(alerta|critico)$/.exec(part.trim())
+    if (!match) {
+      invalido = true
+      continue
+    }
+    const sensor = SENSORES.find((s) => s.alertKey === match[1])
+    const level = match[2]
+    if (
+      estados[sensor.key] === 'desconhecido' ||
+      PESO[level] > PESO[estados[sensor.key]]
+    )
+      estados[sensor.key] = level
+  }
+  if (!invalido) {
+    for (const sensor of SENSORES)
+      if (estados[sensor.key] === 'desconhecido') estados[sensor.key] = 'normal'
+  }
+  return { estados, disponivel: !invalido, invalido }
 }
+
 export function nivelPorValor(sensor, value) {
+  value = numeroSensor(value)
+  if (value === null) return null
   const l = sensor.limites
-  if (l.length === 2) return value <= l[0] ? 0 : value <= l[1] ? 1 : 2
-  return value < l[0] || value > l[3] ? 2 : value < l[1] || value > l[2] ? 1 : 0
+  if (l.length === 2) return value > l[1] ? 2 : value > l[0] ? 1 : 0
+  if (value < l[0] || value > l[3]) return 2
+  return value < l[1] || value > l[2] ? 1 : 0
 }
+
+export function avaliarSensores(alert, values = {}) {
+  const informado = interpretarAlerta(alert)
+  const sensores = Object.fromEntries(
+    SENSORES.map((sensor) => {
+      const valor = numeroSensor(values?.[sensor.key])
+      const nivel = nivelPorValor(sensor, valor)
+      const calculado = nivel === null ? 'desconhecido' : NIVEIS[nivel]
+      const dispositivo = informado.estados[sensor.key]
+      // Ausência de leitura nunca é confirmada como normal, mesmo com alert=ok.
+      const status =
+        nivel === null
+          ? 'desconhecido'
+          : PESO[dispositivo] > nivel
+            ? dispositivo
+            : calculado
+      const divergente =
+        nivel !== null &&
+        dispositivo !== 'desconhecido' &&
+        calculado !== dispositivo
+      return [
+        sensor.key,
+        { valor, calculado, informado: dispositivo, status, divergente },
+      ]
+    }),
+  )
+  return {
+    sensores,
+    estados: Object.fromEntries(
+      SENSORES.map((s) => [s.key, sensores[s.key].status]),
+    ),
+    divergencias: SENSORES.filter((s) => sensores[s.key].divergente),
+    alertaDisponivel: informado.disponivel,
+    alertaInvalido: informado.invalido,
+  }
+}
+
 export function formatarValor(value) {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })
-    : '—'
+  const numero = numeroSensor(value)
+  return numero === null
+    ? '—'
+    : numero.toLocaleString('pt-BR', { maximumFractionDigits: 1 })
 }
 
 export function estadoGeral(statuses) {
