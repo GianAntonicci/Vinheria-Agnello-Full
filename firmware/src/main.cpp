@@ -60,6 +60,8 @@
 //Autor Rev32: Gianluca Antonicci
 //Rev33: 16-10-2026 Seta da tela de configurações passa a usar image_arrow.h (a do WiFi continua com image_arrow_right_bits.h)
 //Autor Rev33: Gianluca Antonicci
+//Rev34: 22-10-2026 Alertas do atributo alert separados por vírgula: o ";" é proibido no Orion e a atualização de state/ledMode/alert era recusada quando havia mais de uma anomalia
+//Autor Rev34: Gianluca Antonicci
 
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -741,7 +743,7 @@ void EnviaEstadoOutputMQTT() {
     String alerta = "";
     for (int i = 0; i < QTD_ANOM; i++) {
         if (niveis[i] == NIVEL_OK) continue;
-        if (alerta.length()) alerta += ";";
+        if (alerta.length()) alerta += ",";
         alerta += String(NOMES_ANOM[i]) + (niveis[i] == NIVEL_CRITICO ? ":critico" : ":alerta");
     }
     if (alerta.length() == 0) alerta = "ok";
