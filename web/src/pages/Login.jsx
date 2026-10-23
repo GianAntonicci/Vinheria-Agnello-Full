@@ -53,39 +53,41 @@ export default function Login({ onConnect }) {
             Vinheria<strong>Agnello.</strong>
           </span>
         </div>
-        <div>
-          <span className="eyebrow">TRADIÇÃO QUE ENCONTRA TECNOLOGIA</span>
-          <h1>
-            O ambiente ideal.
-            <br />
-            Em cada safra.
-          </h1>
+        <div className="login-overview">
+          <span className="eyebrow">CONTROLE DO AMBIENTE</span>
+          <h1>Monitoramento da adega.</h1>
           <p>
-            Acompanhe as condições da sua adega e cuide do que torna cada vinho
-            especial.
+            Temperatura, umidade e luminosidade reunidas em um único painel.
           </p>
           <div className="login-stats">
             {[
-              ['thermometer', 'Temperatura'],
-              ['droplet', 'Umidade'],
-              ['sun', 'Luminosidade'],
-            ].map(([icon, label]) => (
-              <span key={icon}>
-                <Icon name={icon} />
-                {label}
-              </span>
+              ['thermometer', 'Temperatura', 'Condições de armazenamento'],
+              ['droplet', 'Umidade', 'Equilíbrio do ambiente'],
+              ['sun', 'Luminosidade', 'Exposição à luz'],
+            ].map(([icon, label, description]) => (
+              <div className="login-sensor" key={icon}>
+                <span className="login-sensor-icon">
+                  <Icon name={icon} />
+                </span>
+                <span>
+                  <strong>{label}</strong>
+                  <small>{description}</small>
+                </span>
+              </div>
             ))}
           </div>
         </div>
-        <small>VINHERIA AGNELLO · MONITORAMENTO INTELIGENTE</small>
+        <small>
+          VINHERIA AGNELLO <span aria-hidden="true">/</span> PAINEL DE MONITORAMENTO
+        </small>
       </section>
       <section className="login-form-section">
         <form className="login-form" onSubmit={submit}>
           <span className="circle-icon">
             <Icon name="server" size={25} />
           </span>
-          <span className="eyebrow">BEM-VINDO À SUA ADEGA</span>
-          <h2>Vamos conectar.</h2>
+          <span className="eyebrow">ACESSO AO PAINEL</span>
+          <h2>Conecte sua adega.</h2>
           <p className="muted">
             Informe o IP público do seu servidor AWS para acessar o painel de
             monitoramento.
