@@ -96,7 +96,6 @@ export default function Login({ onConnect }) {
               required
               value={ip}
               onChange={(e) => setIp(e.target.value)}
-              placeholder="Ex.: 54.236.175.117"
               inputMode="decimal"
               autoComplete="off"
               spellCheck="false"

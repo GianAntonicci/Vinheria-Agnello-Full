@@ -4,18 +4,31 @@ Dashboard em português com React, Vite, Tailwind CSS v4 e Recharts, mais API Fa
 
 ## Desenvolvimento local
 
-Requisitos: Node.js 22.12 ou superior e Python 3.12 ou superior. A partir da raiz do repositório:
+Requisitos: Node.js 22.12+ e Python 3.12+. Instale o Python em [python.org](https://www.python.org/downloads/). No Windows, marque **Add python.exe to PATH** no instalador; o launcher `py` também é aceito. No macOS, você pode usar `brew install python@3.12`, seguindo as instruções do Homebrew para disponibilizar `python3` no PATH. No Linux, instale também o suporte a `venv`/`pip` da sua distribuição, se fornecido em um pacote separado.
+
+No macOS ou Linux, a partir da raiz do repositório:
 
 ```sh
-python3 -m venv web/.venv
-source web/.venv/bin/activate
-python -m pip install -r web/requirements.txt
 cd web
-npm ci
+npm install
 npm run dev
 ```
 
-Abra `http://localhost:5173`. O comando inicia Vite e Uvicorn; mantenha o ambiente Python ativado. O Vite encaminha `/api` para `http://127.0.0.1:8000`, sem configuração adicional de CORS. Para rodar separadamente, use `npm run dev:web` e `npm run dev:api` em terminais com o ambiente Python ativado.
+No Windows (PowerShell ou cmd), a partir da raiz do repositório:
+
+```text
+cd web
+npm install
+npm run dev
+```
+
+Basta executar `npm install` e `npm run dev` dentro de `web/`, sem ativar um ambiente Python. Abra `http://localhost:5173`. O comando inicia Vite e Uvicorn e, na primeira execução, cria `web/.venv` e instala `requirements-dev.txt` (incluindo `requirements.txt`). Essa preparação requer acesso à internet. Nas próximas execuções, só instala novamente se o conteúdo de um desses arquivos mudar; o hash da última instalação bem-sucedida fica em `.venv/.requirements-dev.sha256`.
+
+O inicializador usa `.venv/bin/python` no macOS/Linux e `.venv/Scripts/python.exe` no Windows. Para criar o ambiente, procura Python 3.12+ em `python3` e `python`; no Windows, tenta primeiro `py -3.12` e `py -3`. Se um ambiente existente estiver incompleto ou usar um Python antigo, remova ou renomeie `web/.venv` e execute novamente.
+
+O Vite encaminha `/api` para `http://127.0.0.1:8000`, sem configuração adicional de CORS. A API escuta apenas nesse endereço local. Se a porta 8000 estiver ocupada, o comando informa o conflito e encerra também o Vite. Use Ctrl+C para encerrar o ambiente; no Windows, o inicializador encerra a árvore do Uvicorn com `taskkill`, incluindo o worker do reloader.
+
+Para só preparar o Python, use `npm run setup:api`, que não inicia nenhum servidor. Para rodar separadamente, use `npm run dev:web` e `npm run dev:api` em dois terminais, também sem ativação manual.
 
 Informe o IPv4 público da EC2 ou abra `http://localhost:5173/?ip=54.236.175.117`. A aplicação testa o Orion antes de abrir o painel. O IP e o dispositivo selecionado ficam salvos no navegador. Sair e Trocar servidor apagam a conexão salva e o IP da URL. O tema permanece salvo.
 
@@ -66,10 +79,11 @@ A edição preserva ID, nome e tipo da entidade, conforme a [API do IoT Agent](h
 ```sh
 npm run lint
 npm run build
-python -m pip install -r requirements-dev.txt
-python -m unittest discover -s src/api/tests -v
+npm run setup:api
 node --test src/config/sensores.test.js src/lib/polling.test.js
 ```
+
+Para os testes Python, execute `.venv/bin/python -m unittest discover -s src/api/tests -v` no macOS/Linux ou `.venv\Scripts\python.exe -m unittest discover -s src/api/tests -v` no PowerShell/cmd, dentro de `web/`.
 
 Os testes simulam o FIWARE e cobrem destino, headers, timeout, respostas agrupadas, histórico parcial, comandos, cadastro, edição e exclusão parcial. A validação com EC2, ESP32 e roteamento real do Vercel exige infraestrutura ativa.
 

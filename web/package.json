@@ -4,12 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n web,api -c cyan,magenta \"npm:dev:web\" \"npm:dev:api\"",
+    "dev": "concurrently --kill-others-on-fail -n web,api -c cyan,magenta \"npm:dev:web\" \"npm:dev:api\"",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "dev:web": "vite",
-    "dev:api": "python3 -m uvicorn src.api.app:app --reload --port 8000"
+    "dev:api": "node scripts/dev-api.mjs",
+    "setup:api": "node scripts/dev-api.mjs --setup"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
