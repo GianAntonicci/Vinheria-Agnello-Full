@@ -47,12 +47,6 @@ export default function Sidebar({ page, setPage, logout, ip, open, setOpen }) {
             </button>
           ))}
         </nav>
-        <div className="sidebar-note">
-          <Icon name="wine" size={27} />
-          <h3>Cuidado em cada detalhe.</h3>
-          <p>Tecnologia a serviço da conservação dos seus vinhos.</p>
-          <span>MONITORAMENTO AMBIENTAL</span>
-        </div>
         <footer>
           <div className="server-label">
             <Icon name="server" size={17} />
