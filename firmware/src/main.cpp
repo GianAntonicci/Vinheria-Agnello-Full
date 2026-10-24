@@ -62,6 +62,8 @@
 //Autor Rev33: Gianluca Antonicci
 //Rev34: 22-10-2026 Alertas do atributo alert separados por vírgula: o ";" é proibido no Orion e a atualização de state/ledMode/alert era recusada quando havia mais de uma anomalia
 //Autor Rev34: Gianluca Antonicci
+//Rev35: 24-10-2026 Tela do QR code do dashboard web (layout do Lopaka), aberta pela seta à esquerda do horário no menu, com "< Voltar" para o menu
+//Autor Rev35: Gianluca Antonicci
 
 // Bibliotecas de rede, periféricos, sensores e persistência usadas pela placa física.
 #include <WiFi.h>
@@ -84,6 +86,7 @@
 #include "mute_32_32_28f.h"
 #include "toggle_32_32_28f.h"
 #include "blushing_48_48_28f.h"
+#include "image_qrcode_bits.h"
 
 // Declarações antecipadas para funções chamadas antes de suas definições.
 void mqtt_callback(char* topic, byte* payload, unsigned int length);
@@ -184,7 +187,7 @@ Preferences prefs;
 bool temaClaro = false;
 bool buzzerMudo = false;
 
-enum Tela { TELA_MENU, TELA_CONFIG, TELA_WIFI };
+enum Tela { TELA_MENU, TELA_CONFIG, TELA_WIFI, TELA_LINK };
 Tela telaAtual = TELA_MENU;
 
 // Calibração invertida dos eixos para a rotação 3; os eixos são trocados em handleTouch().
@@ -454,11 +457,28 @@ void desenhaWifi() {
     desenhaStatusConexao("MQTT: ", MQTT.connected(), 13, 117);
 }
 
+// Monta a tela com o QR code de acesso ao dashboard web e o retorno ao menu.
+void drawlink() {
+    display.fillScreen(COR_FUNDO);
+    display.setFont((const GFXfont*)NULL);
+    display.setTextColor(0xBDF7);
+    display.setTextSize(3);
+    display.setCursor(45 + OX, 20 + OY);
+    display.print("Dashboard Web");
+    display.drawBitmap(77 + OX, 46 + OY, image_qrcode_bits, 167, 167, COR_TEXTO);
+    display.setFont(&FreeMonoBold12pt7b);
+    display.setTextSize(1);
+    display.setTextColor(COR_TEXTO);
+    textoPeloTopo("< Voltar", 10, 218);
+    display.setFont((const GFXfont*)NULL);
+}
+
 // Troca a tela ativa e redesenha seu conteúdo inicial por completo.
 void abreTela(Tela tela) {
     telaAtual = tela;
     if (tela == TELA_MENU) desenhaMenu();
     else if (tela == TELA_CONFIG) desenhaConfig();
+    else if (tela == TELA_LINK) drawlink();
     else desenhaWifi();
 }
 
@@ -656,7 +676,7 @@ void handleDisplayWifi() {
 void handleDisplay() {
     if (telaAtual == TELA_CONFIG) handleDisplayConfig();
     else if (telaAtual == TELA_WIFI) handleDisplayWifi();
-    else handleDisplayMenu();
+    else if (telaAtual == TELA_MENU) handleDisplayMenu();
 }
 
 // Separa a cadência das animações da atualização das leituras e evita redesenhos desnecessários.
@@ -694,9 +714,10 @@ bool tocouEm(int x, int y, int rx, int ry, int rw, int rh) {
     return x >= rx - FOLGA && x < rx + rw + FOLGA && y >= ry - FOLGA && y < ry + rh + FOLGA;
 }
 
-// Abre as configurações quando a engrenagem do menu é tocada.
+// Abre as configurações pela engrenagem e o QR code do dashboard pela seta.
 void toqueMenu(int x, int y) {
     if (tocouEm(x, y, 288, 0, 32, 32)) abreTela(TELA_CONFIG);
+    else if (tocouEm(x, y, 0, 0, 32, 32)) abreTela(TELA_LINK);
 }
 
 // Trata navegação e preferências, persistindo as alterações de tema e áudio na flash.
@@ -739,6 +760,9 @@ void handleTouch() {
     Serial.printf("- Toque bruto x=%d y=%d z=%d -> tela x=%d y=%d\n", bx, by, bz, x, y);
     if (telaAtual == TELA_MENU) toqueMenu(x, y);
     else if (telaAtual == TELA_CONFIG) toqueConfig(x, y);
+    else if (telaAtual == TELA_LINK) {
+        if (tocouEm(x, y, 0, 213, 140, 27)) abreTela(TELA_MENU);
+    }
     else if (tocouEm(x, y, 15, 15, 35, 25)) abreTela(TELA_CONFIG);
 }
 
