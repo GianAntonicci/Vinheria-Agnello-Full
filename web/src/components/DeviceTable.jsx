@@ -1,3 +1,4 @@
+// Apresenta o inventário e encaminha as ações de seleção, detalhes, edição e exclusão ao componente pai.
 import Icon from './Icon'
 import StatusBadge from './StatusBadge'
 export default function DeviceTable({
@@ -10,6 +11,7 @@ export default function DeviceTable({
   onDelete,
   onDetail,
 }) {
+  // Carregamento, erro e lista vazia recebem mensagens próprias antes da tabela.
   if (loading)
     return <div className="empty-state">Carregando dispositivos...</div>
   if (error)

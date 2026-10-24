@@ -63,6 +63,7 @@
 //Rev34: 22-10-2026 Alertas do atributo alert separados por vírgula: o ";" é proibido no Orion e a atualização de state/ledMode/alert era recusada quando havia mais de uma anomalia
 //Autor Rev34: Gianluca Antonicci
 
+// Bibliotecas de rede, periféricos, sensores e persistência usadas pela placa física.
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <SPI.h>
@@ -72,6 +73,7 @@
 #include <Preferences.h>
 #include <Fonts/FreeMonoBold12pt7b.h>
 
+// Recursos gráficos monocromáticos armazenados em flash para as telas e animações.
 #include "down_arrow_32_32_28f.h"
 #include "gear_32_32_28f.h"
 #include "sun_weather_32_32_28f.h"
@@ -83,6 +85,7 @@
 #include "toggle_32_32_28f.h"
 #include "blushing_48_48_28f.h"
 
+// Declarações antecipadas para funções chamadas antes de suas definições.
 void mqtt_callback(char* topic, byte* payload, unsigned int length);
 void VerificaConexoesWiFIEMQTT();
 void EnviaEstadoOutputMQTT();
@@ -96,6 +99,7 @@ void handleDisplayMenu();
 void desenhaMenu();
 void handleTouch();
 
+// Pinagem do TFT SPI, controlador de toque, DHT22 e iluminação do display.
 #define TFT_SCK   13
 #define TFT_MOSI  14
 #define TFT_CS    5
@@ -114,15 +118,18 @@ DHT dht(DHTPIN, DHTTYPE);
 
 Adafruit_ILI9341 display(TFT_CS, TFT_DC, TFT_RST);
 
+// Deslocamentos comuns do layout de 320 x 240 pixels.
 const int OX = 0;
 const int OY = 0;
 
+// Comandos de conversão dos eixos e canais de pressão do XPT2046.
 const uint8_t XPT_X  = 0xD0;
 const uint8_t XPT_Y  = 0x90;
 const uint8_t XPT_Z1 = 0xB0;
 const uint8_t XPT_Z2 = 0xC0;
 const int PRESSAO_MINIMA = 400;
 
+// Transfere um byte por SPI em software, do bit mais significativo ao menos significativo.
 uint8_t trocaByteXPT(uint8_t envia) {
     uint8_t recebe = 0;
     for (int i = 7; i >= 0; i--) {
@@ -136,14 +143,17 @@ uint8_t trocaByteXPT(uint8_t envia) {
     return recebe;
 }
 
+// Envia o comando e extrai a conversão de 12 bits devolvida pelo XPT2046.
 uint16_t leXPT(uint8_t comando) {
     trocaByteXPT(comando);
     delayMicroseconds(2);
     uint16_t alto = trocaByteXPT(0);
     uint16_t baixo = trocaByteXPT(0);
+    // Os 12 bits úteis vêm alinhados acima de três bits descartáveis na resposta.
     return ((alto << 8) | baixo) >> 3;
 }
 
+// Verifica a interrupção e a pressão; retorna nos parâmetros a média de quatro amostras por eixo.
 bool leToque(int& x, int& y, int& z) {
     if (digitalRead(TOUCH_IRQ) == HIGH) return false;
     digitalWrite(TOUCH_CS, LOW);
@@ -161,6 +171,7 @@ bool leToque(int& x, int& y, int& z) {
     return z >= PRESSAO_MINIMA;
 }
 
+// Paleta RGB565: fundo, texto e borda variam com o tema; os níveis mantêm cores fixas.
 uint16_t COR_FUNDO = 0x0000;
 uint16_t COR_TEXTO = 0xFFFF;
 uint16_t COR_BORDA = 0xEF7D;
@@ -168,6 +179,7 @@ const uint16_t COR_OK    = 0x07E0;
 const uint16_t COR_ERRO  = 0xF800;
 const uint16_t COR_ALERTA = 0xFFE0;
 
+// Preferências persistentes e estado de navegação da interface local.
 Preferences prefs;
 bool temaClaro = false;
 bool buzzerMudo = false;
@@ -175,16 +187,19 @@ bool buzzerMudo = false;
 enum Tela { TELA_MENU, TELA_CONFIG, TELA_WIFI };
 Tela telaAtual = TELA_MENU;
 
+// Calibração invertida dos eixos para a rotação 3; os eixos são trocados em handleTouch().
 const int TOUCH_X_MIN = 3800;
 const int TOUCH_X_MAX = 300;
 const int TOUCH_Y_MIN = 3800;
 const int TOUCH_Y_MAX = 300;
 
+// Extremos da animação de 28 quadros dos interruptores.
 const int QUADRO_DESLIGADO = 0;
 const int QUADRO_LIGADO = 27;
 int quadroTema = QUADRO_DESLIGADO;
 int quadroAudio = QUADRO_DESLIGADO;
 
+// Geometria das barras e intervalos independentes de animação e atualização numérica.
 const int BARRA_X = 41 + OX;
 const int BARRA_W = 246;
 const int BARRA_H = 17;
@@ -201,9 +216,11 @@ const int PIN_B = 12;
 
 const int PIN_BUZZER = 4;
 
+// Ordem dos limiares: crítico inferior, alerta inferior, alerta superior e crítico superior.
 struct Faixa { float critMin, alertaMin, alertaMax, critMax; };
 const Faixa FAIXA_TEMP = {  8.0, 10.0, 16.0, 18.0 };
 const Faixa FAIXA_UMID = { 40.0, 50.0, 75.0, 85.0 };
+// Limiares inferiores negativos desativam os alertas de pouca luz para leituras de 0 a 100%.
 const Faixa FAIXA_LUZ  = { -1.0, -1.0, 30.0, 60.0 };
 
 enum Nivel { NIVEL_OK = 0, NIVEL_ALERTA = 1, NIVEL_CRITICO = 2 };
@@ -211,10 +228,12 @@ enum Anomalia { ANOM_TEMP = 0, ANOM_UMID = 1, ANOM_LUZ = 2, QTD_ANOM = 3 };
 const char* NOMES_ANOM[QTD_ANOM] = { "temp", "umid", "luz" };
 Nivel niveis[QTD_ANOM] = { NIVEL_OK, NIVEL_OK, NIVEL_OK };
 
+// NaN representa ausência de leitura válida do DHT22; a luz começa em zero.
 float temperatura = NAN;
 float umidade = NAN;
 int luminosidade = 0;
 
+// Cada nota define frequência em Hz e duração em ms; frequência zero representa silêncio.
 struct Nota { uint16_t freq; uint16_t ms; };
 const Nota SOM_TEMP[] = { {2000, 150}, {0, 100}, {2000, 150}, {0, 1100} };
 const Nota SOM_UMID[] = { {900, 700}, {0, 800} };
@@ -222,6 +241,7 @@ const Nota SOM_LUZ[]  = { {1500, 80}, {0, 80}, {1500, 80}, {0, 80}, {1500, 80}, 
 struct Padrao { const Nota* notas; uint8_t qtd; };
 const Padrao PADROES[QTD_ANOM] = { {SOM_TEMP, 4}, {SOM_UMID, 2}, {SOM_LUZ, 6} };
 
+// Estado de controle do LED e relógios que limitam as publicações MQTT.
 bool modoManual = false;
 String corManual = "off";
 const unsigned long INTERVALO_PISCA = 500;
@@ -229,6 +249,7 @@ const unsigned long INTERVALO_PUBLICACAO = 1000;
 unsigned long ultimaPublicacaoEstado = 0;
 unsigned long ultimaPublicacaoLuz = 0;
 
+// Parâmetros de conexão e tópicos do dispositivo provisionado no IoT Agent.
 const char* default_SSID = "Galaxy S26 Ultra Gianluca";
 const char* default_PASSWORD = "1008100810";
 const char* default_BROKER_MQTT = "54.236.175.117";
@@ -253,16 +274,19 @@ char* TOPICO_PUBLISH_3 = const_cast<char*>(default_TOPICO_PUBLISH_3);
 char* TOPICO_PUBLISH_4 = const_cast<char*>(default_TOPICO_PUBLISH_4);
 unsigned long ultimateLeituraDHT = 0;
 
+// O cliente MQTT utiliza o transporte TCP do Wi-Fi.
 WiFiClient espClient;
 PubSubClient MQTT(espClient);
 String corAtual = "off";
 
+// Aplica a intensidade PWM de cada canal do LED RGB.
 void setRGB(int r, int g, int b) {
     analogWrite(PIN_R, r);
     analogWrite(PIN_G, g);
     analogWrite(PIN_B, b);
 }
 
+// Traduz o nome recebido pelo MQTT em intensidades RGB; rejeita nomes desconhecidos.
 bool aplicaCor(const String& cor) {
     if (cor == "red")          setRGB(255, 0, 0);
     else if (cor == "green")   setRGB(0, 255, 0);
@@ -276,6 +300,7 @@ bool aplicaCor(const String& cor) {
     return true;
 }
 
+// Limpa a faixa de texto antes de escrever, evitando sobreposição de mensagens.
 void escreveLinha(int y, const String& texto, uint16_t cor = COR_TEXTO) {
     display.fillRect(0, y, display.width(), 16, COR_FUNDO);
     display.setTextSize(2);
@@ -284,13 +309,16 @@ void escreveLinha(int y, const String& texto, uint16_t cor = COR_TEXTO) {
     display.print(texto);
 }
 
+// Exibe título e detalhe nas telas de conexão da inicialização.
 void telaMensagem(const String& titulo, const String& detalhe) {
     display.fillScreen(COR_FUNDO);
     escreveLinha(60, titulo);
     escreveLinha(110, detalhe);
 }
 
+// Converte o bitmap monocromático da flash em pixels RGB565 usando o fundo do tema.
 void desenhaIcone(int x, int y, const uint8_t* quadro, uint16_t cor, int tamanho = 32) {
+    // Buffer reutilizado: comporta tanto ícones de 32 x 32 quanto de 48 x 48 pixels.
     static uint16_t buf[48 * 48];
     for (int i = 0; i < tamanho * tamanho; i++) {
         uint8_t b = pgm_read_byte(&quadro[i / 8]);
@@ -299,6 +327,7 @@ void desenhaIcone(int x, int y, const uint8_t* quadro, uint16_t cor, int tamanho
     display.drawRGBBitmap(x + OX, y + OY, buf, tamanho, tamanho);
 }
 
+// Seleciona o quadro pelo relógio para manter os ícones de sensores e navegação sincronizados.
 void desenhaAnimacoes() {
     int q = millis() / INTERVALO_QUADRO % 28;
     desenhaIcone(0, 83, (const uint8_t*)temperature_weather_32_32_28f_frames[q], 0x05FA);
@@ -308,12 +337,14 @@ void desenhaAnimacoes() {
     desenhaIcone(288, 0, (const uint8_t*)gear_32_32_28f_frames[q], COR_BORDA);
 }
 
+// Associa a gravidade às cores verde, amarelo e vermelho do display.
 uint16_t corDoNivel(Nivel n) {
     if (n == NIVEL_CRITICO) return COR_ERRO;
     if (n == NIVEL_ALERTA) return COR_ALERTA;
     return COR_OK;
 }
 
+// Redesenha o texto e o preenchimento proporcional, limitando a largura à área interna.
 void desenhaBarra(int y, const String& texto, float valor, float vMin, float vMax, Nivel nivel) {
     display.setFont((const GFXfont*)NULL);
     display.setTextSize(1);
@@ -331,6 +362,7 @@ void desenhaBarra(int y, const String& texto, float valor, float vMin, float vMa
         display.fillRoundRect(BARRA_X + 2, y + 2, largura, BARRA_H - 4, 6, corDoNivel(nivel));
 }
 
+// Formata as leituras e atualiza as três barras; NaN aparece como ausência de leitura.
 void desenhaValores() {
     String t = isnan(temperatura) ? String("--") : String(temperatura, 1);
     String h = isnan(umidade) ? String("--") : String(umidade, 1);
@@ -339,6 +371,7 @@ void desenhaValores() {
     desenhaBarra(BARRA_Y_UMID, "Umidade: " + h + " %", umidade, 0, 100, niveis[ANOM_UMID]);
 }
 
+// Desenha as bordas estáticas e preenche o menu com as leituras e os ícones atuais.
 void desenhaMenu() {
     display.fillScreen(COR_FUNDO);
     display.drawRoundRect(BARRA_X, BARRA_Y_TEMP, BARRA_W, BARRA_H, 8, COR_BORDA);
@@ -348,6 +381,7 @@ void desenhaMenu() {
     desenhaAnimacoes();
 }
 
+// Atualiza a paleta RGB565 compartilhada pelas telas conforme a preferência de tema.
 void aplicaTema() {
     if (temaClaro) {
         COR_FUNDO = 0xFFFF;
@@ -360,6 +394,7 @@ void aplicaTema() {
     }
 }
 
+// Abre as preferências na flash e restaura tema, áudio e quadros dos interruptores.
 void carregaConfiguracoes() {
     prefs.begin("vinheria", false);
     temaClaro = prefs.getBool("temaClaro", false);
@@ -369,6 +404,7 @@ void carregaConfiguracoes() {
     quadroAudio = buzzerMudo ? QUADRO_LIGADO : QUADRO_DESLIGADO;
 }
 
+// Compensa os deslocamentos da fonte para posicionar o texto pelo canto superior.
 void textoPeloTopo(const char* texto, int x, int y) {
     int16_t x1, y1;
     uint16_t w, h;
@@ -377,11 +413,13 @@ void textoPeloTopo(const char* texto, int x, int y) {
     display.print(texto);
 }
 
+// Desenha os interruptores de tema e áudio nos quadros atuais de suas animações.
 void desenhaIconesConfig() {
     desenhaIcone(260, 47, (const uint8_t*)toggle_32_32_28f_frames[quadroTema], COR_TEXTO);
     desenhaIcone(263, 84, (const uint8_t*)mute_32_32_28f_frames[quadroAudio], COR_TEXTO);
 }
 
+// Monta a tela de preferências com acesso à conexão e retorno ao menu.
 void desenhaConfig() {
     display.fillScreen(COR_FUNDO);
     display.setFont(&FreeMonoBold12pt7b);
@@ -396,6 +434,7 @@ void desenhaConfig() {
     desenhaIconesConfig();
 }
 
+// Limpa e redesenha uma linha de conexão com a cor correspondente ao estado.
 void desenhaStatusConexao(const char* rotulo, bool ok, int x, int y) {
     display.fillRect(OX, y + OY - 4, 320, 28, COR_FUNDO);
     display.setFont(&FreeMonoBold12pt7b);
@@ -407,6 +446,7 @@ void desenhaStatusConexao(const char* rotulo, bool ok, int x, int y) {
     display.setFont((const GFXfont*)NULL);
 }
 
+// Monta a tela de diagnóstico com os estados atuais de Wi-Fi e MQTT.
 void desenhaWifi() {
     display.fillScreen(COR_FUNDO);
     display.drawBitmap(15 + OX, 15 + OY, image_arrow_right_bits, 35, 25, COR_TEXTO);
@@ -414,6 +454,7 @@ void desenhaWifi() {
     desenhaStatusConexao("MQTT: ", MQTT.connected(), 13, 117);
 }
 
+// Troca a tela ativa e redesenha seu conteúdo inicial por completo.
 void abreTela(Tela tela) {
     telaAtual = tela;
     if (tela == TELA_MENU) desenhaMenu();
@@ -421,12 +462,14 @@ void abreTela(Tela tela) {
     else desenhaWifi();
 }
 
+// Avança um quadro em direção ao alvo e informa se houve alteração visual.
 bool avancaQuadro(int& quadro, int alvo) {
     if (quadro == alvo) return false;
     quadro += (alvo > quadro) ? 1 : -1;
     return true;
 }
 
+// Registra sinais e uma conversão interna para auxiliar o diagnóstico da fiação do touch.
 void diagnosticoTouch() {
     digitalWrite(TOUCH_CS, HIGH);
     delay(1);
@@ -440,6 +483,7 @@ void diagnosticoTouch() {
                   doCsAlto, doCsBaixo, temp, digitalRead(TOUCH_IRQ));
 }
 
+// Inicializa o TFT em paisagem e configura os GPIOs do touch com SPI em software.
 void initDisplay() {
     pinMode(TFT_LED, OUTPUT);
     digitalWrite(TFT_LED, HIGH);
@@ -457,10 +501,12 @@ void initDisplay() {
     diagnosticoTouch();
 }
 
+// Inicia o console de diagnóstico na mesma velocidade configurada no PlatformIO.
 void initSerial() {
     Serial.begin(115200);
 }
 
+// Na partida, aguarda a conexão Wi-Fi exibindo o progresso no display.
 void initWiFi() {
     delay(10);
     Serial.println("------Conexao WI-FI------");
@@ -491,6 +537,7 @@ void initWiFi() {
     delay(1000);
 }
 
+// Na partida, tenta conectar ao broker até conseguir e assina o tópico de comandos.
 void initMQTT() {
     MQTT.setServer(BROKER_MQTT, BROKER_PORT);
     MQTT.setSocketTimeout(3);
@@ -522,6 +569,7 @@ void initMQTT() {
     delay(1000);
 }
 
+// Lê temperatura e umidade a cada dois segundos; preserva a leitura anterior se houver falha.
 void handleDHT() {
     if (millis() - ultimateLeituraDHT < 2000) return;
 
@@ -539,6 +587,7 @@ void handleDHT() {
     Serial.printf("Temp: %.1f C | Umid: %.1f %%\n", t, h);
 }
 
+// Prepara saídas, sensores, preferências e conexões uma única vez ao ligar a placa.
 void setup() {
     pinMode(PIN_R, OUTPUT);
     pinMode(PIN_G, OUTPUT);
@@ -559,6 +608,7 @@ void setup() {
     abreTela(TELA_MENU);
 }
 
+// Executa as tarefas recorrentes; cada handler controla seu próprio intervalo de atualização.
 void loop() {
     VerificaConexoesWiFIEMQTT();
     EnviaEstadoOutputMQTT();
@@ -572,6 +622,7 @@ void loop() {
     handleTouch();
 }
 
+// Anima os interruptores até o quadro correspondente à preferência selecionada.
 void handleDisplayConfig() {
     static unsigned long ultimoQuadro = 0;
     if (millis() - ultimoQuadro < INTERVALO_QUADRO) return;
@@ -581,6 +632,7 @@ void handleDisplayConfig() {
     if (mudou) desenhaIconesConfig();
 }
 
+// Anima o ícone e atualiza as linhas de conexão apenas quando o estado muda.
 void handleDisplayWifi() {
     static unsigned long ultimoQuadro = 0;
     static unsigned long ultimaChecagem = 0;
@@ -600,12 +652,14 @@ void handleDisplayWifi() {
     mqttAnterior = mqttOk;
 }
 
+// Encaminha a atualização periódica para a tela que está visível.
 void handleDisplay() {
     if (telaAtual == TELA_CONFIG) handleDisplayConfig();
     else if (telaAtual == TELA_WIFI) handleDisplayWifi();
     else handleDisplayMenu();
 }
 
+// Separa a cadência das animações da atualização das leituras e evita redesenhos desnecessários.
 void handleDisplayMenu() {
     static unsigned long ultimoQuadro = 0;
     static unsigned long ultimosValores = 0;
@@ -632,6 +686,7 @@ void handleDisplayMenu() {
     desenhaValores();
 }
 
+// Testa se o toque está dentro de uma região, com margem de cinco pixels para facilitar o uso.
 bool tocouEm(int x, int y, int rx, int ry, int rw, int rh) {
     const int FOLGA = 5;
     rx += OX;
@@ -639,10 +694,12 @@ bool tocouEm(int x, int y, int rx, int ry, int rw, int rh) {
     return x >= rx - FOLGA && x < rx + rw + FOLGA && y >= ry - FOLGA && y < ry + rh + FOLGA;
 }
 
+// Abre as configurações quando a engrenagem do menu é tocada.
 void toqueMenu(int x, int y) {
     if (tocouEm(x, y, 288, 0, 32, 32)) abreTela(TELA_CONFIG);
 }
 
+// Trata navegação e preferências, persistindo as alterações de tema e áudio na flash.
 void toqueConfig(int x, int y) {
     if (tocouEm(x, y, 260, 15, 35, 25)) {
         abreTela(TELA_WIFI);
@@ -660,6 +717,7 @@ void toqueConfig(int x, int y) {
     }
 }
 
+// Aceita um evento por pressão, descarta leituras inválidas e converte os eixos para pixels.
 void handleTouch() {
     static bool tocando = false;
     int bx, by, bz;
@@ -667,6 +725,7 @@ void handleTouch() {
         tocando = false;
         return;
     }
+    // Exige soltar a tela antes de disparar outra ação, evitando alternâncias repetidas.
     if (tocando) return;
     tocando = true;
     if ((bx >= 4000 && by >= 4000) || (bx == 0 && by == 0)) {
@@ -674,6 +733,7 @@ void handleTouch() {
         Serial.println("- Toque ignorado: XPT2046 sem resposta (confira T_DO, T_DIN, T_CLK e T_CS)");
         return;
     }
+    // A orientação física do painel exige usar o eixo bruto Y como X da tela e vice-versa.
     int x = constrain(map(by, TOUCH_X_MIN, TOUCH_X_MAX, 0, display.width()), 0, display.width() - 1);
     int y = constrain(map(bx, TOUCH_Y_MIN, TOUCH_Y_MAX, 0, display.height()), 0, display.height() - 1);
     Serial.printf("- Toque bruto x=%d y=%d z=%d -> tela x=%d y=%d\n", bx, by, bz, x, y);
@@ -682,6 +742,7 @@ void handleTouch() {
     else if (tocouEm(x, y, 15, 15, 35, 25)) abreTela(TELA_CONFIG);
 }
 
+// Limita novas tentativas de conexão Wi-Fi a uma a cada dez segundos durante o uso.
 void reconectWiFi() {
     static unsigned long ultimaTentativa = 0;
     static bool estavaConectado = true;
@@ -701,6 +762,7 @@ void reconectWiFi() {
     WiFi.begin(SSID, PASSWORD);
 }
 
+// Interpreta comandos UltraLight do dispositivo; cores só são aceitas no modo manual.
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
     String msg;
     for (int i = 0; i < length; i++) {
@@ -730,12 +792,14 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
     }
 }
 
+// Recupera o Wi-Fi e só tenta restabelecer o MQTT quando há rede disponível.
 void VerificaConexoesWiFIEMQTT() {
     reconectWiFi();
     if (!MQTT.connected() && WiFi.status() == WL_CONNECTED)
         reconnectMQTT();
 }
 
+// Publica cor, modo e alertas no formato UltraLight uma vez por segundo.
 void EnviaEstadoOutputMQTT() {
     if (millis() - ultimaPublicacaoEstado < INTERVALO_PUBLICACAO) return;
     ultimaPublicacaoEstado = millis();
@@ -743,6 +807,7 @@ void EnviaEstadoOutputMQTT() {
     String alerta = "";
     for (int i = 0; i < QTD_ANOM; i++) {
         if (niveis[i] == NIVEL_OK) continue;
+        // Usa vírgula entre anomalias para manter o valor aceito pelo Orion.
         if (alerta.length()) alerta += ",";
         alerta += String(NOMES_ANOM[i]) + (niveis[i] == NIVEL_CRITICO ? ":critico" : ":alerta");
     }
@@ -754,9 +819,11 @@ void EnviaEstadoOutputMQTT() {
     Serial.println(estado);
 }
 
+// Ponto de extensão vazio, mantido no código; as saídas são configuradas em setup().
 void InitOutput() {
 }
 
+// Espaça as tentativas de MQTT em cinco segundos e refaz a assinatura após reconectar.
 void reconnectMQTT() {
     static unsigned long ultimaTentativa = 0;
     if (millis() - ultimaTentativa < 5000) return;
@@ -771,6 +838,7 @@ void reconnectMQTT() {
     }
 }
 
+// Converte o ADC de 12 bits em percentual invertido e limita a publicação a uma por segundo.
 void handleLuminosity() {
     const int potPin = 1;
     int sensorValue = analogRead(potPin);
@@ -784,13 +852,16 @@ void handleLuminosity() {
     MQTT.publish(TOPICO_PUBLISH_2, mensagem.c_str());
 }
 
+// Compara a leitura com as faixas: limites críticos e de alerta usam desigualdades estritas.
 Nivel classifica(float valor, const Faixa& f) {
+    // A ausência de leitura não dispara alarme nesta classificação do firmware.
     if (isnan(valor)) return NIVEL_OK;
     if (valor < f.critMin || valor > f.critMax) return NIVEL_CRITICO;
     if (valor < f.alertaMin || valor > f.alertaMax) return NIVEL_ALERTA;
     return NIVEL_OK;
 }
 
+// Recalcula os níveis dos sensores e registra no console apenas as mudanças de gravidade.
 void avaliaTriggers() {
     Nivel novos[QTD_ANOM] = {
         classifica(temperatura, FAIXA_TEMP),
@@ -806,6 +877,7 @@ void avaliaTriggers() {
     }
 }
 
+// No automático, sinaliza o pior nível e pisca nos alertas; no manual, mantém a cor escolhida.
 void handleLED() {
     if (modoManual) {
         aplicaCor(corManual);
@@ -823,11 +895,13 @@ void handleLED() {
         return;
     }
 
+    // Publica a cor lógica do alerta mesmo durante a metade apagada do pisca.
     corAtual = (pior == NIVEL_CRITICO) ? "red" : "yellow";
     bool aceso = (millis() / INTERVALO_PISCA) % 2 == 0;
     aplicaCor(aceso ? corAtual : String("off"));
 }
 
+// Reproduz notas sem espera fixa e alterna ciclicamente entre as anomalias ativas.
 void handleBuzzer() {
     static int somAtual = -1;
     static uint8_t passo = 0;
@@ -839,6 +913,7 @@ void handleBuzzer() {
         return;
     }
 
+    // Percorre as anomalias em rodízio para que cada uma tenha seu padrão sonoro.
     auto proximaAtiva = [](int atual) {
         for (int k = 1; k <= QTD_ANOM; k++) {
             int i = (atual + k + QTD_ANOM) % QTD_ANOM;
@@ -861,6 +936,7 @@ void handleBuzzer() {
         return;
     }
 
+    // Só avança quando a duração da nota termina, mantendo o loop disponível.
     if (millis() - inicioPasso < PADROES[somAtual].notas[passo].ms) return;
 
     passo++;

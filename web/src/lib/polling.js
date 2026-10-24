@@ -1,3 +1,4 @@
+// Controla consultas periódicas sem sobreposição e permite cancelá-las ao sair da tela.
 // Serializa as consultas e preserva atualizações solicitadas durante uma leitura.
 export function criarPolling(
   consultar,
@@ -11,6 +12,7 @@ export function criarPolling(
   let timer
   const controller = new AbortController()
 
+  // Uma atualização pedida durante a consulta fica pendente para a próxima execução.
   async function atualizar() {
     if (!ativo) return
     if (ocupado) {
@@ -24,12 +26,14 @@ export function criarPolling(
     } finally {
       ocupado = false
       if (ativo) {
+        // Conta o intervalo após concluir a consulta; pedidos pendentes são executados logo em seguida.
         timer = agendar(atualizar, pendente ? 0 : intervalo)
         pendente = false
       }
     }
   }
 
+  // Interrompe a requisição em curso e impede novos agendamentos.
   function encerrar() {
     ativo = false
     controller.abort()

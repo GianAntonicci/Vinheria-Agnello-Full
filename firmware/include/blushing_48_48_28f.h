@@ -1,3 +1,5 @@
+// Animação blushing_48_48_28f: 28 quadros monocromáticos de 48 x 48 pixels.
+// Cada bit representa um pixel; PROGMEM mantém os quadros na flash, lidos por desenhaIcone().
 #ifndef BLUSHING_48_48_28F_H
 #define BLUSHING_48_48_28F_H
 

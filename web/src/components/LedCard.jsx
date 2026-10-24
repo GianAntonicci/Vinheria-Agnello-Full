@@ -1,3 +1,4 @@
+// Envia comandos do LED e distingue a intenção do usuário do estado confirmado pelo dispositivo.
 import { useState } from 'react'
 import { CORES } from '../config/sensores'
 import { api, mensagemErro } from '../lib/api'
@@ -10,6 +11,7 @@ export default function LedCard({ values, params, refresh, unavailable }) {
   const confirmedMode = values?.ledMode
   // Descarta a intenção assim que uma leitura confirma o modo solicitado.
   if (requestedMode && confirmedMode === requestedMode) setRequestedMode(null)
+  // A intenção permite escolher a cor enquanto a confirmação do modo manual ainda não chegou.
   const mode = requestedMode ?? confirmedMode
   const manual = mode === 'manual'
   const modeKnown = ['manual', 'auto'].includes(mode)
@@ -20,6 +22,7 @@ export default function LedCard({ values, params, refresh, unavailable }) {
   const color = CORES.find((c) => c.comando === selectedColor)
   const awaitingColor = manual && requestedColor && requestedColor !== values?.state
   const awaitingConfirmation = requestedMode && requestedMode !== confirmedMode
+  // A aceitação pela API registra a solicitação; a confirmação física depende das próximas leituras.
   async function send(command) {
     setBusy(command)
     setFeedback(null)
@@ -35,6 +38,7 @@ export default function LedCard({ values, params, refresh, unavailable }) {
         setRequestedColor(command)
       }
       setFeedback({ ok: true, text: result.mensagem })
+      // Solicita nova leitura; o polling preserva o pedido se já houver uma consulta em andamento.
       refresh()
     } catch (error) {
       setFeedback({ ok: false, text: mensagemErro(error) })

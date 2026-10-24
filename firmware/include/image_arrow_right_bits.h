@@ -1,3 +1,5 @@
+// Seta monocromática de 35 x 25 pixels, armazenada em flash (PROGMEM).
+// Os bytes codificam linhas do bitmap consumido por display.drawBitmap().
 #ifndef IMAGE_ARROW_RIGHT_BITS_H
 #define IMAGE_ARROW_RIGHT_BITS_H
 

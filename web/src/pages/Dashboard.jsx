@@ -1,3 +1,4 @@
+// Reúne leituras atuais, classificação de risco, controle do LED e histórico do dispositivo selecionado.
 import { useCallback, useState } from 'react'
 import { api } from '../lib/api'
 import usePolling from '../hooks/usePolling'
@@ -20,6 +21,7 @@ export default function Dashboard({ ip, device }) {
   const [points, setPoints] = useState(30)
   const entity = device.entity_name,
     entity_type = device.entity_type
+  // Callbacks estáveis reiniciam o polling apenas quando IP ou identidade da entidade mudam.
   const currentFetcher = useCallback(
     (signal) => api('atual', { ip, entity, entity_type }, { signal }),
     [ip, entity, entity_type],
@@ -29,14 +31,17 @@ export default function Dashboard({ ip, device }) {
       api('historico', { ip, entity, entity_type, lastN: points }, { signal }),
     [ip, entity, entity_type, points],
   )
+  // Leituras atuais são consultadas a cada 5 s; séries históricas, a cada 10 s.
   const current = usePolling(currentFetcher, 5000)
   const history = usePolling(historyFetcher, 10000)
   const values = current.data?.values || {}
   const assessment = avaliarSensores(values.alert, values)
+  // Uma falha de consulta mantém os últimos valores visíveis, mas torna os estados desconhecidos.
   const statuses = current.error
     ? Object.fromEntries(SENSORES.map((s) => [s.key, 'desconhecido']))
     : assessment.estados
   const general = estadoGeral(statuses)
+  // Compara a gravidade atual com a consulta anterior para informar melhora ou piora.
   const previousAssessment = avaliarSensores(
     current.previous?.values?.alert,
     current.previous?.values,

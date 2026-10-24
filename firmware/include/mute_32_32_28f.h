@@ -1,3 +1,5 @@
+// Animação mute_32_32_28f: 28 quadros monocromáticos de 32 x 32 pixels.
+// Cada bit representa um pixel; PROGMEM mantém os quadros na flash, lidos por desenhaIcone().
 #ifndef MUTE_32_32_28F_H
 #define MUTE_32_32_28F_H
 

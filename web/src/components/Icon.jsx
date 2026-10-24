@@ -1,3 +1,4 @@
+// Catálogo de caminhos SVG; os ícones herdam a cor do texto por currentColor.
 const paths = {
   home: 'm3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z',
   devices: 'M4 3h16v12H4z M8 21h8 M12 15v6 M7 7h3 M7 11h6',
@@ -26,6 +27,7 @@ const paths = {
   light: 'M9 18h6 M10 21h4 M9 15a6 6 0 1 1 6 0v3H9Z',
   clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 7v5l3 2',
 }
+// Ícones são decorativos para leitores de tela; o controle que os contém fornece o rótulo acessível.
 export default function Icon({ name, size = 20, ...props }) {
   return (
     <svg

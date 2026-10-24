@@ -1,3 +1,4 @@
+// Gerencia o inventário do IoT Agent, os formulários de cadastro/edição e os detalhes do Orion.
 import { useCallback, useEffect, useState } from 'react'
 import { api, mensagemErro } from '../lib/api'
 import DeviceTable from '../components/DeviceTable'
@@ -13,6 +14,7 @@ export default function Devices({ ip, device, selectDevice }) {
   const [notice, setNotice] = useState(null)
   const [removeEntity, setRemoveEntity] = useState(false)
   const [detail, setDetail] = useState({ loading: true })
+  // Ignora respostas de consultas canceladas ao trocar o IP ou sair da página.
   const load = useCallback(
     (signal) => {
       return api('dispositivos', { ip }, { signal })
@@ -27,6 +29,7 @@ export default function Devices({ ip, device, selectDevice }) {
     },
     [ip],
   )
+  // Reativa o indicador de carregamento e consulta novamente a lista de dispositivos.
   function reload() {
     setList((old) => ({ ...old, loading: true, error: '' }))
     load()
@@ -37,6 +40,7 @@ export default function Devices({ ip, device, selectDevice }) {
     return () => c.abort()
   }, [load])
   useEffect(() => {
+    // Busca os atributos da entidade apenas quando o modal de detalhes está aberto.
     if (modal?.type !== 'detail') return
     const c = new AbortController(),
       d = modal.device
@@ -54,12 +58,14 @@ export default function Devices({ ip, device, selectDevice }) {
       })
     return () => c.abort()
   }, [modal, ip])
+  // Reinicia os estados transitórios antes de abrir uma nova operação.
   function open(type, d) {
     setModal({ type, device: d })
     setError('')
     setRemoveEntity(false)
     setDetail({ loading: true })
   }
+  // Cadastro envia opções de provisionamento; edição envia apenas a definição do dispositivo.
   async function save(payload) {
     setBusy(true)
     setError('')
@@ -75,6 +81,7 @@ export default function Devices({ ip, device, selectDevice }) {
           body: JSON.stringify(editing ? payload.device : payload),
         },
       )
+      // Atualiza também a seleção do dashboard quando o dispositivo editado está em exibição.
       if (editing && device.device_id === payload.device.device_id)
         selectDevice(payload.device)
       setNotice({
@@ -93,6 +100,7 @@ export default function Devices({ ip, device, selectDevice }) {
       setBusy(false)
     }
   }
+  // Remove o cadastro e, se solicitado no modal, pede também a exclusão da entidade no Orion.
   async function remove() {
     setBusy(true)
     setError('')

@@ -7,17 +7,21 @@ from fastapi.testclient import TestClient
 from src.api.app import app
 from src.api.fiware import requisitar
 
+# Cliente em memória; as chamadas ao FIWARE são substituídas por mocks nos cenários.
 client = TestClient(app)
 IP = "54.236.175.117"
 DEVICE = {"device_id": "lamp001", "entity_name": "urn:ngsi-ld:Lamp:001", "entity_type": "Lamp", "attributes": [{"object_id": "t", "name": "temperature", "type": "Float"}], "commands": [{"name": "red", "type": "command"}]}
 
+# Regressões de validação, integração HTTP e operações de dispositivos sem servidor externo.
 class ApiTests(unittest.TestCase):
+    # Verifica: rejeita destinos inseguros.
     def test_rejeita_destinos_inseguros(self):
         with patch("src.api.fiware.requests.Session") as session:
             for ip in ("127.0.0.1", "10.0.0.1", "169.254.169.254", "::1", "http://54.236.175.117", "224.0.0.1", "255.255.255.255"):
                 self.assertEqual(client.get("/api/conexao", params={"ip": ip}).status_code, 422)
             session.assert_not_called()
 
+    # Verifica: headers timeout sem redirecionamento.
     def test_headers_timeout_sem_redirecionamento(self):
         with patch("src.api.fiware.requests.Session") as factory:
             session = factory.return_value.__enter__.return_value
@@ -30,6 +34,7 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(kwargs["timeout"], (3, 6))
             self.assertFalse(session.trust_env)
 
+    # Verifica: timeout vira 502.
     def test_timeout_vira_502(self):
         with patch("src.api.fiware.requests.Session") as factory:
             factory.return_value.__enter__.return_value.request.side_effect = requests.Timeout()
@@ -127,6 +132,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("entidade permanece", response.json()["warnings"][0])
 
+    # Verifica: rejeita caminhos e nomes repetidos.
     def test_rejeita_caminhos_e_nomes_repetidos(self):
         for payload in ({**DEVICE, "entity_name": "../metadata"}, {**DEVICE, "attributes": DEVICE["attributes"] * 2}):
             self.assertEqual(client.post("/api/dispositivos", params={"ip": IP}, json={"device": payload}).status_code, 422)

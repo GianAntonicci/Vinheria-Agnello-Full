@@ -1,7 +1,9 @@
+// Coordena conexão com o servidor, navegação, dispositivo selecionado e tema persistente.
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import Icon from './components/Icon'
 import Login from './pages/Login'
+// Carrega o dashboard sob demanda, incluindo sua biblioteca de gráficos.
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 import Devices from './pages/Devices'
 import Settings from './pages/Settings'
@@ -18,6 +20,7 @@ export default function App() {
   const [theme, setTheme] = useState(
     () => localStorage.getItem('agnello-theme') || 'light',
   )
+  // Recupera a seleção salva e volta ao modelo padrão se o JSON estiver inválido.
   const [device, setDevice] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('agnello-device')) || PADRAO
@@ -25,10 +28,12 @@ export default function App() {
       return PADRAO
     }
   })
+  // Mantém o atributo usado pelo CSS e a preferência salva sincronizados com o tema.
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('agnello-theme', theme)
   }, [theme])
+  // Ao trocar de servidor, descarta a seleção anterior e registra o IP na URL e no navegador.
   const connect = useCallback((value) => {
     const previous = localStorage.getItem('agnello-ip')
     if (previous !== value) {
@@ -41,6 +46,7 @@ export default function App() {
     window.history.replaceState({}, '', url)
     setIp(value)
   }, [])
+  // Limpa a conexão e a seleção local e retorna à tela de acesso.
   function logout() {
     localStorage.removeItem('agnello-ip')
     localStorage.removeItem('agnello-device')
@@ -53,6 +59,7 @@ export default function App() {
     setDevice(PADRAO)
     setMenu(false)
   }
+  // Compartilha a seleção com as páginas e a preserva entre recargas.
   function selectDevice(value) {
     setDevice(value)
     localStorage.setItem('agnello-device', JSON.stringify(value))

@@ -1,3 +1,4 @@
+// Exibe a leitura atual, a variação desde a consulta anterior e o horário de um sensor.
 import Icon from './Icon'
 import StatusBadge from './StatusBadge'
 import ReadingTime from './ReadingTime'
@@ -14,7 +15,9 @@ export default function IndicatorCard({
 }) {
   value = numeroSensor(value)
   previous = numeroSensor(previous)
+  // Só calcula a variação quando as duas leituras são válidas.
   const delta = value !== null && previous !== null ? value - previous : null
+  // A tendência considera a gravidade da faixa, pois aumentar ou diminuir o valor nem sempre melhora o ambiente.
   const good =
     delta !== null &&
     nivelPorValor(sensor, value) <= nivelPorValor(sensor, previous)

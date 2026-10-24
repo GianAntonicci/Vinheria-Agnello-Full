@@ -1,3 +1,4 @@
+// Janela baseada em dialog nativo, com controle de foco e bloqueio do fechamento durante operações.
 import { useEffect, useRef } from 'react'
 import Icon from './Icon'
 export default function Modal({
@@ -10,6 +11,7 @@ export default function Modal({
   const ref = useRef(null)
   useEffect(() => {
     const dialog = ref.current
+    // Guarda o elemento de origem para devolver o foco quando o modal for desmontado.
     const previous = document.activeElement
     dialog.showModal()
     return () => {

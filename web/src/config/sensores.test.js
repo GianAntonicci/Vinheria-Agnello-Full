@@ -1,3 +1,4 @@
+// Cobre limites de classificação, leituras inválidas, alertas atuais/legados e divergências com o firmware.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {

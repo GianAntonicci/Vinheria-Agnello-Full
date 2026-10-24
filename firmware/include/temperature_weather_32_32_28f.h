@@ -1,3 +1,5 @@
+// Animação temperature_weather_32_32_28f: 28 quadros monocromáticos de 32 x 32 pixels.
+// Cada bit representa um pixel; PROGMEM mantém os quadros na flash, lidos por desenhaIcone().
 #ifndef TEMPERATURE_WEATHER_32_32_28F_H
 #define TEMPERATURE_WEATHER_32_32_28F_H
 

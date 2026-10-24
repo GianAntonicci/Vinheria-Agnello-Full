@@ -1,3 +1,4 @@
+// Prepara o ambiente Python local e inicia a API FastAPI com recarga durante o desenvolvimento.
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -10,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const windows = process.platform === 'win32'
 const venv = path.join(root, '.venv')
+// Ajusta o executável do ambiente virtual para Windows ou sistemas POSIX.
 const python = path.join(venv, windows ? 'Scripts' : 'bin', windows ? 'python.exe' : 'python')
 const marker = path.join(venv, '.requirements-dev.sha256')
 const versionCheck = 'import sys; print(sys.version_info[:2])'
@@ -36,6 +38,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   })
 }
 
+// Propaga a interrupção para evitar continuar a preparação após um sinal de encerramento.
 function checkStopped() {
   if (stoppingSignal) {
     const error = new Error('Inicialização interrompida.')
@@ -44,6 +47,7 @@ function checkStopped() {
   }
 }
 
+// Consulta a versão sem shell e aceita apenas Python 3.12 ou superior da série 3.
 function supportsPython(command, args = []) {
   const result = spawnSync(command, [...args, '-c', versionCheck], {
     cwd: root,
@@ -56,6 +60,7 @@ function supportsPython(command, args = []) {
   return result.status === 0 && version && Number(version[1]) === 3 && Number(version[2]) >= 12
 }
 
+// Acompanha o processo filho e converte falhas ou sinais em códigos de saída do launcher.
 async function run(command, args) {
   checkStopped()
   await new Promise((resolve, reject) => {
@@ -75,6 +80,7 @@ async function run(command, args) {
   })
 }
 
+// Testa a disponibilidade da porta antes da preparação e novamente antes de iniciar o servidor.
 async function checkPort() {
   checkStopped()
   await new Promise((resolve, reject) => {
@@ -86,12 +92,14 @@ async function checkPort() {
   })
 }
 
+// O modo --setup apenas prepara as dependências; o modo padrão também inicia o Uvicorn.
 async function main() {
   const args = process.argv.slice(2)
   if (args.some((arg) => arg !== '--setup')) throw new Error('Uso: node scripts/dev-api.mjs [--setup]')
   const setupOnly = args.includes('--setup')
   if (!setupOnly) await checkPort()
 
+  // Cria um ambiente virtual apenas se ele ainda não existir e valida o interpretador resultante.
   let created = false
   if (!existsSync(venv)) {
     const candidates = [
@@ -109,6 +117,7 @@ async function main() {
     throw new Error(`O ambiente web/.venv está incompleto ou não usa Python 3.12+. Remova ou renomeie esse ambiente e tente novamente. ${installHelp}`)
   }
 
+  // O hash dos dois arquivos de requisitos evita reinstalar dependências que não mudaram.
   const hash = createHash('sha256')
   for (const filename of ['requirements.txt', 'requirements-dev.txt']) {
     hash.update(filename).update('\0').update(await readFile(path.join(root, filename))).update('\0')
@@ -132,6 +141,7 @@ async function main() {
     return
   }
   await checkPort()
+  // Restringe a API ao computador local; o Vite encaminha as chamadas /api para esta porta.
   await run(python, ['-m', 'uvicorn', 'src.api.app:app', '--reload', '--reload-dir', 'src/api',
     '--host', '127.0.0.1', '--port', '8000'])
 }

@@ -1,3 +1,5 @@
+// Referências compartilhadas de sensores, provisionamento e classificação dos estados do ambiente.
+// Limites equivalentes aos do firmware: quatro para temperatura/umidade e dois para luz.
 export const SENSORES = [
   {
     key: 'temperature',
@@ -39,6 +41,7 @@ export const SENSORES = [
     critico: 'Acima de 60 %',
   },
 ]
+// Nomes de comandos aceitos pelo firmware e cores correspondentes na interface.
 export const CORES = [
   { comando: 'red', nome: 'Vermelho', hex: '#e54c4c' },
   { comando: 'green', nome: 'Verde', hex: '#32a46b' },
@@ -49,6 +52,7 @@ export const CORES = [
   { comando: 'white', nome: 'Branco', hex: '#ffffff' },
   { comando: 'off', nome: 'Desligado', hex: '#303332' },
 ]
+// Modelo de provisionamento: mapeia as chaves UltraLight para os atributos NGSI do Orion.
 export const PADRAO = {
   device_id: 'lamp001',
   entity_name: 'urn:ngsi-ld:Lamp:001',
@@ -77,8 +81,10 @@ export const ESTADOS = {
 }
 export const PESO = { normal: 0, alerta: 1, critico: 2 }
 const NIVEIS = ['normal', 'alerta', 'critico']
+// A interface destaca leituras com mais de 30 segundos em relação à consulta da API.
 export const LEITURA_DESATUALIZADA_MS = 30000
 
+// Aceita apenas números finitos e strings numéricas completas; vazios não viram zero.
 export function numeroSensor(value) {
   if (typeof value === 'string') {
     value = value.trim()
@@ -89,6 +95,7 @@ export function numeroSensor(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+// Decodifica alertas atuais com vírgula e legados com ponto e vírgula.
 export function interpretarAlerta(alert) {
   const estados = Object.fromEntries(
     SENSORES.map((s) => [s.key, 'desconhecido']),
@@ -96,6 +103,7 @@ export function interpretarAlerta(alert) {
   if (typeof alert !== 'string' || !alert.trim()) {
     return { estados, disponivel: false, invalido: false }
   }
+  // Normaliza caixa, acentos e espaços antes de validar cada identificação de sensor.
   const normalized = alert
     .trim()
     .toLowerCase()
@@ -128,6 +136,7 @@ export function interpretarAlerta(alert) {
     )
       estados[sensor.key] = level
   }
+  // Só considera normais os sensores omitidos quando o conjunto inteiro é válido.
   if (!invalido) {
     for (const sensor of SENSORES)
       if (estados[sensor.key] === 'desconhecido') estados[sensor.key] = 'normal'
@@ -135,6 +144,7 @@ export function interpretarAlerta(alert) {
   return { estados, disponivel: !invalido, invalido }
 }
 
+// Retorna 0, 1 ou 2 para normal, alerta ou crítico; null indica leitura inválida.
 export function nivelPorValor(sensor, value) {
   value = numeroSensor(value)
   if (value === null) return null
@@ -144,6 +154,7 @@ export function nivelPorValor(sensor, value) {
   return value < l[1] || value > l[2] ? 1 : 0
 }
 
+// Cruza os limites locais com o alerta recebido, preservando a maior gravidade e as divergências.
 export function avaliarSensores(alert, values = {}) {
   const informado = interpretarAlerta(alert)
   const sensores = Object.fromEntries(
@@ -180,6 +191,7 @@ export function avaliarSensores(alert, values = {}) {
   }
 }
 
+// Formata com uma casa decimal em português; valores ausentes usam um travessão.
 export function formatarValor(value) {
   const numero = numeroSensor(value)
   return numero === null
@@ -187,6 +199,7 @@ export function formatarValor(value) {
     : numero.toLocaleString('pt-BR', { maximumFractionDigits: 1 })
 }
 
+// Prioriza crítico e alerta; dados incompletos têm precedência sobre normalidade.
 export function estadoGeral(statuses) {
   const levels = Object.values(statuses)
   return (

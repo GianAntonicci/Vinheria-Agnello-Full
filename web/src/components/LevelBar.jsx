@@ -1,3 +1,4 @@
+// Mostra a leitura como barra proporcional acompanhada das faixas de normalidade, alerta e criticidade.
 import StatusBadge from './StatusBadge'
 import Icon from './Icon'
 import { formatarValor, numeroSensor } from '../config/sensores'
@@ -5,6 +6,7 @@ export default function LevelBar({ sensor, value, status }) {
   value = numeroSensor(value)
   const valid = value !== null
   const points = [0, ...sensor.limites, sensor.max]
+  // Luz tem apenas limites superiores; os outros sensores têm faixas dos dois lados da região normal.
   const classes =
     sensor.limites.length === 2
       ? ['normal', 'alerta', 'critico']

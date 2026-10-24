@@ -1,5 +1,7 @@
+// Navegação principal com identificação do servidor e menu recolhível em telas menores.
 import Icon from './Icon'
 export default function Sidebar({ page, setPage, logout, ip, open, setOpen }) {
+  // Fecha o menu móvel após selecionar a página.
   function navigate(value) {
     setPage(value)
     setOpen(false)

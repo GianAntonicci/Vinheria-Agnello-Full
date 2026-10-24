@@ -1,7 +1,9 @@
+// Verifica a conexão com o servidor FIWARE antes de liberar o painel.
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import Icon from '../components/Icon'
 export default function Login({ onConnect }) {
+  // O IP da URL tem prioridade sobre o último endereço salvo no navegador.
   const [ip, setIp] = useState(
     () =>
       new URLSearchParams(location.search).get('ip') ||
@@ -10,6 +12,7 @@ export default function Login({ onConnect }) {
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // Tenta restaurar a conexão salva e cancela a consulta ao desmontar a tela.
   useEffect(() => {
     const saved =
       new URLSearchParams(location.search).get('ip') ||
@@ -29,6 +32,7 @@ export default function Login({ onConnect }) {
       controller.abort()
     }
   }, [onConnect])
+  // Valida o endereço pela API antes de comunicar a conexão ao componente principal.
   async function submit(event) {
     event.preventDefault()
     setBusy(true)

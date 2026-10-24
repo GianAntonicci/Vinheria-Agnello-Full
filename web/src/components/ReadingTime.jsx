@@ -1,3 +1,4 @@
+// Apresenta o instante da leitura no Orion e destaca dados antigos em relação à consulta.
 import Icon from './Icon'
 import { LEITURA_DESATUALIZADA_MS } from '../config/sensores'
 
@@ -8,6 +9,7 @@ export default function ReadingTime({
 }) {
   const date = typeof timestamp === 'string' ? new Date(timestamp) : null
   const valid = date && Number.isFinite(date.getTime())
+  // Usa o horário retornado pela API como referência para calcular a idade da leitura.
   const stale =
     valid &&
     Date.parse(referenceTime) - date.getTime() > LEITURA_DESATUALIZADA_MS

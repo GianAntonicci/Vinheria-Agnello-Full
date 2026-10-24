@@ -1,3 +1,4 @@
+// Exibe o tema do painel, o servidor conectado e as faixas de referência dos sensores.
 import { SENSORES } from '../config/sensores'
 import Icon from '../components/Icon'
 export default function Settings({ ip, theme, setTheme, logout }) {

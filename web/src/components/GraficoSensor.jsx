@@ -1,3 +1,4 @@
+// Renderiza a série histórica de um sensor com horário local, unidade e destaque para a última amostra.
 import {
   Bar,
   BarChart,
@@ -9,6 +10,7 @@ import {
   YAxis,
 } from 'recharts'
 import Icon from './Icon'
+// Formatação comum aos rótulos do eixo horizontal e à dica de cada barra.
 const horario = (value) =>
   new Date(value).toLocaleTimeString('pt-BR', {
     hour: '2-digit',

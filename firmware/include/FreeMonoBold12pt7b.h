@@ -1,3 +1,5 @@
+// Recurso de fonte FreeMonoBold12pt7b: bitmaps, métricas dos glifos e descritor GFX em flash (PROGMEM).
+// As tabelas são dados gráficos; seus offsets e dimensões devem permanecer consistentes.
 #pragma once
 #include <Adafruit_GFX.h>
 

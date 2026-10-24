@@ -1,3 +1,4 @@
+// Testa o agendamento e a serialização do polling com relógio controlado, sem aguardar intervalos reais.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { criarPolling } from './polling.js'

@@ -1,8 +1,10 @@
+// Formulário de atributos e comandos usado no cadastro e na edição de dispositivos.
 import { useState } from 'react'
 import { PADRAO } from '../config/sensores'
 import Icon from './Icon'
 const types = ['Float', 'Integer', 'Text', 'Boolean', 'Number']
 export default function DeviceForm({ device, onSubmit, busy }) {
+  // Clona os dados e seleciona os campos editáveis para não modificar o modelo nem o objeto recebido.
   const [form, setForm] = useState(() =>
     structuredClone(
       device
@@ -24,9 +26,11 @@ export default function DeviceForm({ device, onSubmit, busy }) {
   )
   const [register, setRegister] = useState(true)
   const [subscribe, setSubscribe] = useState(true)
+  // Atualiza um campo sem alterar o objeto de estado anterior.
   function update(key, value) {
     setForm((old) => ({ ...old, [key]: value }))
   }
+  // Substitui somente o campo da linha indicada na lista de atributos ou comandos.
   function row(key, index, field, value) {
     update(
       key,
@@ -35,6 +39,7 @@ export default function DeviceForm({ device, onSubmit, busy }) {
       ),
     )
   }
+  // Remove a linha selecionada preservando as demais definições.
   function remove(key, index) {
     update(
       key,
