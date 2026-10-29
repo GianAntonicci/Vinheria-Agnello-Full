@@ -64,9 +64,13 @@
 //Autor Rev34: Gianluca Antonicci
 //Rev35: 24-10-2026 Tela do QR code do dashboard web (layout do Lopaka), aberta pela seta à esquerda do horário no menu, com "< Voltar" para o menu
 //Autor Rev35: Gianluca Antonicci
+//Rev36: 28-10-2026 Portal de configuração: o ESP32 abre um Access Point com página HTTP para cadastrar Wi-Fi e broker MQTT, salvos na memória flash
+//Autor Rev36: Gianluca Antonicci
 
 // Bibliotecas de rede, periféricos, sensores e persistência usadas pela placa física.
 #include <WiFi.h>
+#include <WebServer.h>
+#include <DNSServer.h>
 #include <PubSubClient.h>
 #include <SPI.h>
 #include <Adafruit_GFX.h>
@@ -101,6 +105,9 @@ void handleDisplay();
 void handleDisplayMenu();
 void desenhaMenu();
 void handleTouch();
+void handlePortal();
+void abrePortal(bool fechaAoConectar);
+void fechaPortal();
 
 // Pinagem do TFT SPI, controlador de toque, DHT22 e iluminação do display.
 #define TFT_SCK   13
@@ -187,7 +194,7 @@ Preferences prefs;
 bool temaClaro = false;
 bool buzzerMudo = false;
 
-enum Tela { TELA_MENU, TELA_CONFIG, TELA_WIFI, TELA_LINK };
+enum Tela { TELA_MENU, TELA_CONFIG, TELA_WIFI, TELA_LINK, TELA_PORTAL };
 Tela telaAtual = TELA_MENU;
 
 // Calibração invertida dos eixos para a rotação 3; os eixos são trocados em handleTouch().
@@ -253,20 +260,18 @@ unsigned long ultimaPublicacaoEstado = 0;
 unsigned long ultimaPublicacaoLuz = 0;
 
 // Parâmetros de conexão e tópicos do dispositivo provisionado no IoT Agent.
-const char* default_SSID = "Galaxy S26 Ultra Gianluca";
-const char* default_PASSWORD = "1008100810";
-const char* default_BROKER_MQTT = "54.236.175.117";
-const int default_BROKER_PORT = 1883;
+// Rede e broker vêm da flash (cadastrados pelo portal); buffers globais porque o PubSubClient guarda o ponteiro do host.
+const uint16_t default_BROKER_PORT = 1883;
+char wifiSsid[33] = "";
+char wifiSenha[65] = "";
+char brokerMqtt[65] = "";
+uint16_t brokerPorta = default_BROKER_PORT;
 const char* default_TOPICO_SUBSCRIBE = "/TEF/lamp001/cmd";
 const char* default_TOPICO_PUBLISH_1 = "/TEF/lamp001/attrs";
 const char* default_TOPICO_PUBLISH_2 = "/TEF/lamp001/attrs/l";
 const char* default_ID_MQTT = "fiware_001";
 const char* topicPrefix = "lamp001";
 
-char* SSID = const_cast<char*>(default_SSID);
-char* PASSWORD = const_cast<char*>(default_PASSWORD);
-char* BROKER_MQTT = const_cast<char*>(default_BROKER_MQTT);
-int BROKER_PORT = default_BROKER_PORT;
 char* TOPICO_SUBSCRIBE = const_cast<char*>(default_TOPICO_SUBSCRIBE);
 char* TOPICO_PUBLISH_1 = const_cast<char*>(default_TOPICO_PUBLISH_1);
 char* TOPICO_PUBLISH_2 = const_cast<char*>(default_TOPICO_PUBLISH_2);
@@ -281,6 +286,27 @@ unsigned long ultimateLeituraDHT = 0;
 WiFiClient espClient;
 PubSubClient MQTT(espClient);
 String corAtual = "off";
+
+// Portal de configuração: Access Point próprio, DNS que responde tudo com o IP do portal e servidor HTTP.
+const char* SENHA_AP = "vinheria123";
+const IPAddress IP_PORTAL(192, 168, 4, 1);
+const unsigned long TEMPO_LIMITE_WIFI = 20000;
+const unsigned long TEMPO_LIMITE_MQTT = 10000;
+const unsigned long ESPERA_REINICIO = 2000;
+WebServer server(80);
+DNSServer dnsServer;
+char nomeAP[16] = "";
+bool portalAtivo = false;
+bool portalFechaAoConectar = false;
+bool reinicioPendente = false;
+unsigned long instanteReinicio = 0;
+
+// Redes do último scan, sem nomes repetidos e ordenadas pelo sinal.
+struct RedeEncontrada { char ssid[33]; int32_t rssi; };
+const int MAX_REDES = 20;
+RedeEncontrada redes[MAX_REDES];
+int qtdRedes = 0;
+bool scanEmAndamento = false;
 
 // Aplica a intensidade PWM de cada canal do LED RGB.
 void setRGB(int r, int g, int b) {
@@ -397,6 +423,17 @@ void aplicaTema() {
     }
 }
 
+// Lê a rede Wi-Fi e o broker MQTT salvos na flash; a senha nunca é impressa.
+void carregaRede() {
+    wifiSsid[0] = wifiSenha[0] = brokerMqtt[0] = '\0';
+    if (prefs.isKey("wifiSsid")) prefs.getString("wifiSsid", wifiSsid, sizeof(wifiSsid));
+    if (prefs.isKey("wifiSenha")) prefs.getString("wifiSenha", wifiSenha, sizeof(wifiSenha));
+    if (prefs.isKey("mqttHost")) prefs.getString("mqttHost", brokerMqtt, sizeof(brokerMqtt));
+    brokerPorta = prefs.getUShort("mqttPorta", default_BROKER_PORT);
+    if (wifiSsid[0]) Serial.printf("Configuracao de rede carregada: rede \"%s\", broker %s:%u\n", wifiSsid, brokerMqtt, brokerPorta);
+    else Serial.println("Nenhuma rede Wi-Fi salva na memoria flash");
+}
+
 // Abre as preferências na flash e restaura tema, áudio e quadros dos interruptores.
 void carregaConfiguracoes() {
     prefs.begin("vinheria", false);
@@ -405,6 +442,7 @@ void carregaConfiguracoes() {
     aplicaTema();
     quadroTema = temaClaro ? QUADRO_LIGADO : QUADRO_DESLIGADO;
     quadroAudio = buzzerMudo ? QUADRO_LIGADO : QUADRO_DESLIGADO;
+    carregaRede();
 }
 
 // Compensa os deslocamentos da fonte para posicionar o texto pelo canto superior.
@@ -455,6 +493,51 @@ void desenhaWifi() {
     display.drawBitmap(15 + OX, 15 + OY, image_arrow_right_bits, 35, 25, COR_TEXTO);
     desenhaStatusConexao("WiFi: ", WiFi.status() == WL_CONNECTED, 14, 80);
     desenhaStatusConexao("MQTT: ", MQTT.connected(), 13, 117);
+    // Rede e broker em uso, em fonte pequena à direita da seta (até 40 caracteres por linha).
+    String rede = String("Rede: ") + (wifiSsid[0] ? wifiSsid : "(nenhuma)");
+    String broker = String("Broker: ") + (brokerMqtt[0] ? String(brokerMqtt) + ":" + String(brokerPorta) : String("(nenhum)"));
+    display.setTextSize(1);
+    display.setTextColor(COR_TEXTO);
+    display.setCursor(70 + OX, 18 + OY);
+    display.print(rede.substring(0, 40));
+    display.setCursor(70 + OX, 32 + OY);
+    display.print(broker.substring(0, 40));
+    // Botão que abre o portal, no canto inferior direito, abaixo e à direita do ícone animado.
+    display.setFont(&FreeMonoBold12pt7b);
+    textoPeloTopo("Configurar", 178, 212);
+    display.setFont((const GFXfont*)NULL);
+}
+
+// Texto da linha de estado da tela do portal, conforme a conexão com a rede salva.
+String estadoPortal() {
+    if (reinicioPendente) return "Salvo, reiniciando...";
+    if (WiFi.status() == WL_CONNECTED) return String("Conectado a ") + wifiSsid;
+    if (wifiSsid[0]) return String("Conectando a ") + wifiSsid + "...";
+    return "Aguardando configuracao";
+}
+
+// Redesenha só a linha de estado da tela do portal (fonte padrão tamanho 2, até 26 caracteres).
+void desenhaEstadoPortal(const String& estado) {
+    display.fillRect(OX, 150 + OY, 320, 20, COR_FUNDO);
+    display.setFont((const GFXfont*)NULL);
+    display.setTextSize(2);
+    display.setTextColor(COR_ALERTA);
+    display.setCursor(10 + OX, 152 + OY);
+    display.print(estado.substring(0, 26));
+}
+
+// Monta a tela com os dados do Access Point para configurar a rede pelo celular.
+void desenhaPortal() {
+    display.fillScreen(COR_FUNDO);
+    display.setFont(&FreeMonoBold12pt7b);
+    display.setTextSize(1);
+    display.setTextColor(COR_TEXTO);
+    textoPeloTopo("Configurar rede", 10, 15);
+    textoPeloTopo((String("Rede: ") + nomeAP).c_str(), 10, 55);
+    textoPeloTopo((String("Senha: ") + SENHA_AP).c_str(), 10, 85);
+    textoPeloTopo("IP: 192.168.4.1", 10, 115);
+    textoPeloTopo("< Voltar", 10, 205);
+    desenhaEstadoPortal(estadoPortal());
 }
 
 // Monta a tela com o QR code de acesso ao dashboard web e o retorno ao menu.
@@ -479,6 +562,7 @@ void abreTela(Tela tela) {
     if (tela == TELA_MENU) desenhaMenu();
     else if (tela == TELA_CONFIG) desenhaConfig();
     else if (tela == TELA_LINK) drawlink();
+    else if (tela == TELA_PORTAL) desenhaPortal();
     else desenhaWifi();
 }
 
@@ -526,20 +610,275 @@ void initSerial() {
     Serial.begin(115200);
 }
 
-// Na partida, aguarda a conexão Wi-Fi exibindo o progresso no display.
+// Troca os caracteres especiais de HTML para exibir com segurança textos vindos da flash ou do scan.
+String escapaHtml(const String& texto) {
+    String saida;
+    saida.reserve(texto.length() + 8);
+    for (unsigned int i = 0; i < texto.length(); i++) {
+        char c = texto[i];
+        if (c == '&') saida += "&amp;";
+        else if (c == '<') saida += "&lt;";
+        else if (c == '>') saida += "&gt;";
+        else if (c == '"') saida += "&quot;";
+        else if (c == '\'') saida += "&#39;";
+        else saida += c;
+    }
+    return saida;
+}
+
+// Inicia um scan assíncrono para não travar o loop nem a navegação no portal.
+void iniciaScan() {
+    if (scanEmAndamento) return;
+    WiFi.scanDelete();
+    scanEmAndamento = WiFi.scanNetworks(true) == WIFI_SCAN_RUNNING;
+}
+
+// Copia o resultado do scan sem nomes repetidos (fica o sinal mais forte) e ordena pelo sinal.
+void coletaScan() {
+    if (!scanEmAndamento) return;
+    int n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_RUNNING) return;
+    scanEmAndamento = false;
+    if (n < 0) {
+        Serial.println("Falha no scan de redes Wi-Fi");
+        return;
+    }
+    qtdRedes = 0;
+    for (int i = 0; i < n; i++) {
+        String nome = WiFi.SSID(i);
+        if (nome.length() == 0 || nome.length() > 32) continue;
+        int32_t rssi = WiFi.RSSI(i);
+        int j = 0;
+        while (j < qtdRedes && strcmp(redes[j].ssid, nome.c_str()) != 0) j++;
+        if (j < qtdRedes) {
+            if (rssi > redes[j].rssi) redes[j].rssi = rssi;
+        } else if (qtdRedes < MAX_REDES) {
+            strncpy(redes[qtdRedes].ssid, nome.c_str(), sizeof(redes[qtdRedes].ssid));
+            redes[qtdRedes].ssid[32] = '\0';
+            redes[qtdRedes].rssi = rssi;
+            qtdRedes++;
+        }
+    }
+    WiFi.scanDelete();
+    for (int i = 1; i < qtdRedes; i++) {
+        RedeEncontrada atual = redes[i];
+        int j = i - 1;
+        while (j >= 0 && redes[j].rssi < atual.rssi) { redes[j + 1] = redes[j]; j--; }
+        redes[j + 1] = atual;
+    }
+    Serial.printf("Scan concluido: %d redes encontradas\n", qtdRedes);
+}
+
+// Cabeçalho HTML comum com CSS inline, legível na tela do celular.
+String inicioPagina(const char* titulo) {
+    String html;
+    html.reserve(5000);
+    html += F("<!DOCTYPE html><html lang='pt-BR'><head><meta charset='utf-8'>"
+              "<meta name='viewport' content='width=device-width,initial-scale=1'><title>");
+    html += titulo;
+    html += F("</title><style>"
+              "body{font-family:sans-serif;background:#f4f1ee;color:#222;margin:0;padding:16px}"
+              ".box{max-width:420px;margin:auto;background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 4px #0003}"
+              "h1{font-size:1.3em;color:#7a1f3d;margin-top:0}label{display:block;margin-top:12px;font-weight:bold}"
+              "input,select{width:100%;box-sizing:border-box;padding:10px;margin-top:4px;font-size:1em;border:1px solid #bbb;border-radius:4px}"
+              "input[type=checkbox]{width:auto}button{width:100%;padding:12px;margin-top:16px;font-size:1em;border:0;border-radius:4px;color:#fff;background:#7a1f3d}"
+              ".apagar{background:#a33}.nota{font-size:.85em;color:#666}.erro{background:#fdd;color:#900;padding:8px;border-radius:4px}"
+              "table{width:100%;font-size:.9em}td{padding:2px 0}.ok{color:#080}.falha{color:#a00}hr{margin:20px 0}"
+              "</style></head><body><div class='box'>");
+    return html;
+}
+
+// Monta o formulário de configuração; os valores recebidos já são exibidos com escape de HTML.
+String paginaFormulario(const String& erro, const String& ssid, const String& host, const String& porta) {
+    bool wifiOk = WiFi.status() == WL_CONNECTED;
+    bool mqttOk = MQTT.connected();
+    String html = inicioPagina("Vinheria - Configurar rede");
+    html += F("<h1>Configurar rede</h1>");
+    if (erro.length()) html += "<p class='erro'>" + escapaHtml(erro) + "</p>";
+
+    html += F("<table>");
+    html += "<tr><td>Rede salva:</td><td>" + (wifiSsid[0] ? escapaHtml(wifiSsid) : String("(nenhuma)")) + "</td></tr>";
+    html += String("<tr><td>Wi-Fi:</td><td class='") + (wifiOk ? "ok'>Conectado" : "falha'>Desconectado") + "</td></tr>";
+    html += String("<tr><td>MQTT:</td><td class='") + (mqttOk ? "ok'>Conectado" : "falha'>Desconectado") + "</td></tr>";
+    html += "<tr><td>IP recebido:</td><td>" + (wifiOk ? WiFi.localIP().toString() : String("-")) + "</td></tr>";
+    html += F("</table>");
+
+    html += F("<form method='POST' action='/salvar'><label for='rede'>Rede Wi-Fi</label><select id='rede' name='rede'>"
+              "<option value=''>-- escolha uma rede --</option>");
+    bool naLista = false;
+    for (int i = 0; i < qtdRedes; i++) {
+        bool sel = ssid == redes[i].ssid;
+        naLista |= sel;
+        html += "<option value='" + escapaHtml(redes[i].ssid) + "'" + (sel ? " selected" : "") + ">"
+              + escapaHtml(redes[i].ssid) + " (" + String(redes[i].rssi) + " dBm)</option>";
+    }
+    html += F("</select><p class='nota'>");
+    if (scanEmAndamento) html += F("Procurando redes... ");
+    else if (qtdRedes == 0) html += F("Nenhuma rede encontrada. ");
+    html += F("<a href='/atualizar'>Atualizar redes</a>. O ESP32 só conecta em redes de 2,4 GHz.</p>"
+              "<label for='manual'>Ou digite o nome da rede</label>");
+    html += "<input id='manual' name='manual' maxlength='32' value='" + (naLista ? String("") : escapaHtml(ssid)) + "'>";
+    html += F("<label for='senha'>Senha do Wi-Fi</label><input id='senha' name='senha' type='password' maxlength='63'>"
+              "<p class='nota'>Deixe vazio para manter a senha salva (mesma rede) ou para rede aberta.</p>"
+              "<label for='host'>Broker MQTT (IP ou host)</label>");
+    html += "<input id='host' name='host' maxlength='64' value='" + escapaHtml(host) + "'>";
+    html += "<label for='porta'>Porta</label><input id='porta' name='porta' type='number' min='1' max='65535' value='" + escapaHtml(porta) + "'>";
+    html += F("<button type='submit'>Salvar e conectar</button></form><hr>"
+              "<form method='POST' action='/apagar'><label><input type='checkbox' name='confirma' value='1' required> "
+              "Confirmo que quero apagar a rede e o broker salvos</label>"
+              "<button type='submit' class='apagar'>Apagar configuração</button></form>"
+              "</div></body></html>");
+    return html;
+}
+
+// Responde com o formulário preenchido com os valores atuais da flash.
+void handlePaginaInicial() {
+    server.send(200, "text/html; charset=utf-8", paginaFormulario("", wifiSsid, brokerMqtt, String(brokerPorta)));
+}
+
+// Página exibida depois de salvar ou apagar, antes do reinício marcado no loop.
+void respondeReinicio(const char* titulo) {
+    String html = inicioPagina(titulo);
+    html += "<h1>" + String(titulo) + "</h1><p>Reiniciando o ESP32... Reconecte-se à sua rede.</p></div></body></html>";
+    server.send(200, "text/html; charset=utf-8", html);
+    reinicioPendente = true;
+    instanteReinicio = millis();
+    Serial.println("Reiniciando em 2 s para aplicar a configuracao...");
+    if (telaAtual == TELA_PORTAL) desenhaEstadoPortal(estadoPortal());
+}
+
+// Valida e grava a nova rede e broker; com erro, devolve o formulário preenchido (menos a senha).
+void handleSalvar() {
+    String ssid = server.arg("manual");
+    ssid.trim();
+    if (ssid.length() == 0) ssid = server.arg("rede");
+    String senha = server.arg("senha");
+    String host = server.arg("host");
+    host.trim();
+    String porta = server.arg("porta");
+    porta.trim();
+    Serial.printf("Nova configuracao recebida: rede \"%s\", broker %s:%s\n", ssid.c_str(), host.c_str(), porta.c_str());
+
+    long numPorta = porta.toInt();
+    String erro;
+    if (ssid.length() < 1 || ssid.length() > 32) erro = "Escolha ou digite uma rede Wi-Fi (até 32 caracteres).";
+    else if (senha.length() > 0 && (senha.length() < 8 || senha.length() > 63)) erro = "A senha do Wi-Fi deve ter entre 8 e 63 caracteres (ou ficar vazia).";
+    else if (host.length() < 1 || host.length() > 64) erro = "Informe o broker MQTT (até 64 caracteres).";
+    else if (numPorta < 1 || numPorta > 65535 || String(numPorta) != porta) erro = "A porta deve ser um número entre 1 e 65535.";
+    if (erro.length()) {
+        Serial.print("Configuracao recusada: ");
+        Serial.println(erro);
+        server.send(400, "text/html; charset=utf-8", paginaFormulario(erro, ssid, host, porta));
+        return;
+    }
+
+    // Senha vazia na mesma rede já salva mantém a senha antiga.
+    if (senha.length() == 0 && ssid == wifiSsid) senha = wifiSenha;
+    prefs.putString("wifiSsid", ssid);
+    prefs.putString("wifiSenha", senha);
+    prefs.putString("mqttHost", host);
+    prefs.putUShort("mqttPorta", (uint16_t)numPorta);
+    Serial.println("Configuracao de rede salva na memoria flash");
+    respondeReinicio("Configuração salva");
+}
+
+// Remove só as chaves de rede (tema e buzzer ficam) e reinicia.
+void handleApagar() {
+    if (server.arg("confirma") != "1") {
+        server.send(400, "text/html; charset=utf-8", paginaFormulario("Marque a confirmação para apagar.", wifiSsid, brokerMqtt, String(brokerPorta)));
+        return;
+    }
+    prefs.remove("wifiSsid");
+    prefs.remove("wifiSenha");
+    prefs.remove("mqttHost");
+    prefs.remove("mqttPorta");
+    Serial.println("Configuracao de rede apagada da memoria flash");
+    respondeReinicio("Configuração apagada");
+}
+
+// Redireciona qualquer endereço para a página do portal (captive portal).
+void redirecionaPortal() {
+    server.sendHeader("Location", "http://192.168.4.1/", true);
+    server.send(302, "text/plain", "");
+}
+
+// Abre o Access Point Vinheria-XXXX com DNS e servidor HTTP, mantendo o modo estação ativo.
+void abrePortal(bool fechaAoConectar) {
+    if (portalAtivo) return;
+    uint64_t mac = ESP.getEfuseMac();
+    snprintf(nomeAP, sizeof(nomeAP), "Vinheria-%02X%02X", (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAPConfig(IP_PORTAL, IP_PORTAL, IPAddress(255, 255, 255, 0));
+    WiFi.softAP(nomeAP, SENHA_AP);
+    dnsServer.start(53, "*", IP_PORTAL);
+    // As rotas ficam registradas no servidor; só são cadastradas na primeira abertura.
+    static bool rotasRegistradas = false;
+    if (!rotasRegistradas) {
+        rotasRegistradas = true;
+        server.on("/", HTTP_GET, handlePaginaInicial);
+        server.on("/salvar", HTTP_POST, handleSalvar);
+        server.on("/apagar", HTTP_POST, handleApagar);
+        server.on("/atualizar", HTTP_GET, []() { iniciaScan(); redirecionaPortal(); });
+        server.on("/generate_204", HTTP_GET, redirecionaPortal);
+        server.on("/hotspot-detect.html", HTTP_GET, redirecionaPortal);
+        server.onNotFound(redirecionaPortal);
+    }
+    server.begin();
+    portalAtivo = true;
+    portalFechaAoConectar = fechaAoConectar;
+    iniciaScan();
+    Serial.printf("Portal de configuracao aberto: rede %s, acesse http://%s\n", nomeAP, IP_PORTAL.toString().c_str());
+}
+
+// Desliga servidor, DNS e Access Point e volta ao modo só estação.
+void fechaPortal() {
+    if (!portalAtivo) return;
+    server.stop();
+    dnsServer.stop();
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_STA);
+    portalAtivo = false;
+    scanEmAndamento = false;
+    Serial.println("Portal de configuracao fechado");
+}
+
+// Atende o portal enquanto ativo, fecha-o quando a rede salva conecta e reinicia após salvar.
+void handlePortal() {
+    if (reinicioPendente && millis() - instanteReinicio >= ESPERA_REINICIO) {
+        Serial.println("Reiniciando...");
+        ESP.restart();
+    }
+    if (!portalAtivo) return;
+    dnsServer.processNextRequest();
+    server.handleClient();
+    coletaScan();
+    if (portalFechaAoConectar && !reinicioPendente && WiFi.status() == WL_CONNECTED) {
+        Serial.printf("Conectado com sucesso na rede %s\n", wifiSsid);
+        fechaPortal();
+        if (telaAtual == TELA_PORTAL) abreTela(TELA_MENU);
+    }
+}
+
+// Na partida, tenta a rede salva por até 20 s exibindo o progresso; sem rede ou sem sucesso, abre o portal.
 void initWiFi() {
-    delay(10);
     Serial.println("------Conexao WI-FI------");
+    WiFi.mode(WIFI_STA);
+    if (wifiSsid[0] == '\0') {
+        Serial.println("Sem rede salva: abrindo o portal de configuracao");
+        abrePortal(true);
+        return;
+    }
     Serial.print("Conectando-se na rede: ");
-    Serial.println(SSID);
+    Serial.println(wifiSsid);
     Serial.println("Aguarde");
 
-    telaMensagem("Conectando Wi-Fi...", "Rede: " + String(SSID));
+    telaMensagem("Conectando Wi-Fi...", "Rede: " + String(wifiSsid));
 
-    WiFi.begin(SSID, PASSWORD);
+    WiFi.begin(wifiSsid, wifiSenha);
 
     int pontos = 0;
-    while (WiFi.status() != WL_CONNECTED) {
+    unsigned long inicio = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - inicio < TEMPO_LIMITE_WIFI) {
         String aguarde = "Aguarde";
         for (int i = 0; i < pontos; i++) aguarde += ".";
         escreveLinha(160, aguarde);
@@ -548,28 +887,35 @@ void initWiFi() {
         delay(500);
         Serial.print(".");
     }
-
     Serial.println();
-    Serial.print("Conectado com sucesso na rede ");
-    Serial.println(SSID);
 
-    telaMensagem("Wi-Fi conectado!", "Rede: " + String(SSID));
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("Nao foi possivel conectar na rede salva: abrindo o portal de configuracao");
+        abrePortal(true);
+        return;
+    }
+
+    Serial.print("Conectado com sucesso na rede ");
+    Serial.println(wifiSsid);
+
+    telaMensagem("Wi-Fi conectado!", "Rede: " + String(wifiSsid));
     delay(1000);
 }
 
-// Na partida, tenta conectar ao broker até conseguir e assina o tópico de comandos.
+// Na partida, tenta o broker por até 10 s; sem sucesso, segue e o reconnectMQTT() continua tentando.
 void initMQTT() {
-    MQTT.setServer(BROKER_MQTT, BROKER_PORT);
+    MQTT.setServer(brokerMqtt, brokerPorta);
     MQTT.setSocketTimeout(3);
     MQTT.setCallback(mqtt_callback);
+    if (WiFi.status() != WL_CONNECTED || brokerMqtt[0] == '\0') return;
 
-    Serial.print("* Conectando ao Broker MQTT: ");
-    Serial.println(BROKER_MQTT);
+    Serial.printf("* Conectando ao Broker MQTT: %s:%u\n", brokerMqtt, brokerPorta);
 
-    telaMensagem("Conectando MQTT...", "Broker: " + String(BROKER_MQTT));
+    telaMensagem("Conectando MQTT...", "Broker: " + String(brokerMqtt));
 
     int pontos = 0;
-    while (!MQTT.connected()) {
+    unsigned long inicio = millis();
+    while (!MQTT.connected() && millis() - inicio < TEMPO_LIMITE_MQTT) {
         String aguarde = "Aguarde";
         for (int i = 0; i < pontos; i++) aguarde += ".";
         escreveLinha(160, aguarde);
@@ -580,12 +926,20 @@ void initMQTT() {
             Serial.println();
             Serial.println("Conectado com sucesso ao broker MQTT!");
             MQTT.subscribe(TOPICO_SUBSCRIBE);
-        } else {
-            delay(2000);
+        } else if (millis() - inicio < TEMPO_LIMITE_MQTT) {
+            delay(1000);
         }
     }
 
-    telaMensagem("MQTT conectado!", "Broker: " + String(BROKER_MQTT));
+    if (!MQTT.connected()) {
+        Serial.println();
+        Serial.println("Broker MQTT nao respondeu: seguindo para o menu, nova tentativa a cada 5s");
+        telaMensagem("MQTT desconectado", "Tentando a cada 5 s");
+        delay(1000);
+        return;
+    }
+
+    telaMensagem("MQTT conectado!", "Broker: " + String(brokerMqtt));
     delay(1000);
 }
 
@@ -624,7 +978,11 @@ void setup() {
 
     initWiFi();
     initMQTT();
-    MQTT.publish(TOPICO_PUBLISH_1, "s|off");
+    if (portalAtivo) {
+        abreTela(TELA_PORTAL);
+        return;
+    }
+    if (MQTT.connected()) MQTT.publish(TOPICO_PUBLISH_1, "s|off");
     abreTela(TELA_MENU);
 }
 
@@ -640,6 +998,7 @@ void loop() {
     MQTT.loop();
     handleDisplay();
     handleTouch();
+    handlePortal();
 }
 
 // Anima os interruptores até o quadro correspondente à preferência selecionada.
@@ -672,10 +1031,23 @@ void handleDisplayWifi() {
     mqttAnterior = mqttOk;
 }
 
+// Redesenha a linha de estado do portal a cada meio segundo, só quando o texto muda.
+void handleDisplayPortal() {
+    static unsigned long ultimaChecagem = 0;
+    static String estadoAnterior;
+    if (millis() - ultimaChecagem < 500) return;
+    ultimaChecagem = millis();
+    String estado = estadoPortal();
+    if (estado == estadoAnterior) return;
+    estadoAnterior = estado;
+    desenhaEstadoPortal(estado);
+}
+
 // Encaminha a atualização periódica para a tela que está visível.
 void handleDisplay() {
     if (telaAtual == TELA_CONFIG) handleDisplayConfig();
     else if (telaAtual == TELA_WIFI) handleDisplayWifi();
+    else if (telaAtual == TELA_PORTAL) handleDisplayPortal();
     else if (telaAtual == TELA_MENU) handleDisplayMenu();
 }
 
@@ -738,6 +1110,23 @@ void toqueConfig(int x, int y) {
     }
 }
 
+// Volta às configurações pela seta ou abre o portal pelo botão "Configurar".
+void toqueWifi(int x, int y) {
+    if (tocouEm(x, y, 15, 15, 35, 25)) {
+        abreTela(TELA_CONFIG);
+    } else if (tocouEm(x, y, 170, 200, 150, 40)) {
+        abrePortal(false);
+        abreTela(TELA_PORTAL);
+    }
+}
+
+// "< Voltar" fecha o portal se a rede salva estiver conectada e retorna à tela de WiFi/MQTT.
+void toquePortal(int x, int y) {
+    if (!tocouEm(x, y, 0, 195, 140, 45)) return;
+    if (WiFi.status() == WL_CONNECTED) fechaPortal();
+    abreTela(TELA_WIFI);
+}
+
 // Aceita um evento por pressão, descarta leituras inválidas e converte os eixos para pixels.
 void handleTouch() {
     static bool tocando = false;
@@ -763,7 +1152,8 @@ void handleTouch() {
     else if (telaAtual == TELA_LINK) {
         if (tocouEm(x, y, 0, 213, 140, 27)) abreTela(TELA_MENU);
     }
-    else if (tocouEm(x, y, 15, 15, 35, 25)) abreTela(TELA_CONFIG);
+    else if (telaAtual == TELA_PORTAL) toquePortal(x, y);
+    else toqueWifi(x, y);
 }
 
 // Limita novas tentativas de conexão Wi-Fi a uma a cada dez segundos durante o uso.
@@ -773,17 +1163,18 @@ void reconectWiFi() {
     if (WiFi.status() == WL_CONNECTED) {
         if (!estavaConectado) {
             Serial.print("Conectado com sucesso na rede ");
-            Serial.println(SSID);
+            Serial.println(wifiSsid);
         }
         estavaConectado = true;
         return;
     }
     estavaConectado = false;
+    if (wifiSsid[0] == '\0') return;
     if (millis() - ultimaTentativa < 10000) return;
     ultimaTentativa = millis();
     Serial.println("Wi-Fi desconectado, tentando reconectar...");
     WiFi.disconnect();
-    WiFi.begin(SSID, PASSWORD);
+    WiFi.begin(wifiSsid, wifiSenha);
 }
 
 // Interpreta comandos UltraLight do dispositivo; cores só são aceitas no modo manual.
@@ -819,7 +1210,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 // Recupera o Wi-Fi e só tenta restabelecer o MQTT quando há rede disponível.
 void VerificaConexoesWiFIEMQTT() {
     reconectWiFi();
-    if (!MQTT.connected() && WiFi.status() == WL_CONNECTED)
+    if (!MQTT.connected() && WiFi.status() == WL_CONNECTED && brokerMqtt[0])
         reconnectMQTT();
 }
 
@@ -852,8 +1243,7 @@ void reconnectMQTT() {
     static unsigned long ultimaTentativa = 0;
     if (millis() - ultimaTentativa < 5000) return;
     ultimaTentativa = millis();
-    Serial.print("* Tentando se conectar ao Broker MQTT: ");
-    Serial.println(BROKER_MQTT);
+    Serial.printf("* Tentando se conectar ao Broker MQTT: %s:%u\n", brokerMqtt, brokerPorta);
     if (MQTT.connect(ID_MQTT)) {
         Serial.println("Conectado com sucesso ao broker MQTT!");
         MQTT.subscribe(TOPICO_SUBSCRIBE);

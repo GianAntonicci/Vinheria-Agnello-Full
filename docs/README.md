@@ -10,6 +10,7 @@ Projeto desenvolvido para o CP5 da disciplina de Edge Computing.
 2. [Arquitetura em camadas](#arquitetura-em-camadas)
 3. [Como funciona](#como-funciona)
 4. [Hardware e pinagem](#hardware-e-pinagem)
+   - [Simulação no Wokwi](#simulação-no-wokwi)
 5. [Faixas de alerta](#faixas-de-alerta)
 6. [LED: modo automático e manual](#led-modo-automático-e-manual)
 7. [Comunicação MQTT e modelo de dados FIWARE](#comunicação-mqtt-e-modelo-de-dados-fiware)
@@ -183,6 +184,12 @@ Leituras analógicas devem usar apenas os GPIOs 1 a 10 (ADC1), porque o ADC2 nã
 - **Wi-Fi/MQTT:** status das conexões ao vivo. A seta do canto volta para as configurações.
 
 A reconexão de Wi-Fi (a cada 10 s) e de MQTT (a cada 5 s) não trava o loop.
+
+### Simulação no Wokwi
+
+O circuito completo pode ser testado no simulador Wokwi, sem precisar do hardware físico:
+
+[https://wokwi.com/projects/477167157014021121](https://wokwi.com/projects/477167157014021121)
 
 ## Faixas de alerta
 
@@ -526,15 +533,13 @@ O dispositivo também pode ser cadastrado pela página **Dispositivos** do dashb
 ### 3. Firmware com PlatformIO
 
 1. No VS Code, abra a pasta `firmware/` (File > Open Folder) ou adicione-a a um workspace. O PlatformIO só reconhece o projeto se o `platformio.ini` estiver na raiz da pasta aberta.
-2. Em `firmware/src/main.cpp`, preencha localmente:
+2. A rede Wi-Fi e o broker MQTT não ficam no código: são cadastrados pelo portal de configuração do próprio ESP32 e salvos na memória flash. Depois de gravar o firmware (passo 5):
+   1. Ligue a placa. Sem configuração salva (ou se a rede salva não conectar em 20 s), o display mostra a tela "Configurar rede".
+   2. No celular, conecte na rede `Vinheria-XXXX` (os 4 últimos dígitos do MAC aparecem no display) com a senha `vinheria123`.
+   3. A página de configuração abre sozinha; se não abrir, acesse `http://192.168.4.1` no navegador.
+   4. Escolha a rede na lista (ou digite o nome), digite a senha, informe o IP público da EC2 no campo do broker com a porta `1883` e toque em "Salvar e conectar". A placa reinicia e conecta com os novos dados.
 
-   ```cpp
-   const char* default_SSID = "NOME_DA_REDE";
-   const char* default_PASSWORD = "SENHA_DA_REDE";
-   const char* default_BROKER_MQTT = "IP_PUBLICO_DA_EC2";
-   ```
-
-   O ESP32 só conecta em redes de 2,4 GHz. Não faça commit de credenciais reais.
+   O ESP32 só conecta em redes de 2,4 GHz. Para reconfigurar depois, toque na engrenagem do menu, depois na seta de WiFi/MQTT e em "Configurar": o portal abre de novo, mesmo com a placa conectada. Na página, "Apagar configuração" remove a rede e o broker salvos (tema e buzzer são mantidos).
 
 3. Confira se os headers dos ícones (gerados no Lopaka) estão em `firmware/include/`.
 4. Conecte a placa pela porta **UART** (a mesma usada para gravar; em placas com dois conectores USB, normalmente a marcada como "UART" ou "COM"). O `platformio.ini` define `-DARDUINO_USB_CDC_ON_BOOT=0`, então o monitor serial usa essa porta.
