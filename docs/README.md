@@ -10,6 +10,7 @@ Projeto desenvolvido para o CP5 da disciplina de Edge Computing.
 2. [Arquitetura em camadas](#arquitetura-em-camadas)
 3. [Como funciona](#como-funciona)
 4. [Hardware e pinagem](#hardware-e-pinagem)
+   - [Simulação no Wokwi](#simulação-no-wokwi)
 5. [Faixas de alerta](#faixas-de-alerta)
 6. [LED: modo automático e manual](#led-modo-automático-e-manual)
 7. [Comunicação MQTT e modelo de dados FIWARE](#comunicação-mqtt-e-modelo-de-dados-fiware)
@@ -183,6 +184,12 @@ Leituras analógicas devem usar apenas os GPIOs 1 a 10 (ADC1), porque o ADC2 nã
 - **Wi-Fi/MQTT:** status das conexões ao vivo. A seta do canto volta para as configurações.
 
 A reconexão de Wi-Fi (a cada 10 s) e de MQTT (a cada 5 s) não trava o loop.
+
+### Simulação no Wokwi
+
+O circuito completo pode ser testado no simulador Wokwi, sem precisar do hardware físico:
+
+[https://wokwi.com/projects/477167157014021121](https://wokwi.com/projects/477167157014021121)
 
 ## Faixas de alerta
 
