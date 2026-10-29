@@ -905,5 +905,7 @@ Resumo das principais revisões registradas no topo de `main.cpp`:
 | Rev32 | 16/10/2026 | Tela de Wi-Fi/MQTT e reconexão sem travar o loop |
 | Rev33 | 16/10/2026 | Ajuste da seta da tela de configurações |
 | Rev34 | 22/10/2026 | Alertas do atributo `alert` separados por vírgula |
+| Rev35 | 24/10/2026 | Tela do QR code do dashboard web, aberta pela seta ao lado do horário no menu |
+| Rev36 | 28/10/2026 | Portal de configuração: Access Point com página HTTP para cadastrar Wi-Fi e broker MQTT na flash |
 
 
